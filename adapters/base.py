@@ -28,13 +28,15 @@ class BaseAdapter:
             re.IGNORECASE,
         )
 
-        for b in blocks:
+        matched_idx = set()
+        for bi, b in enumerate(blocks):
             if b[6] == 0:  # text
                 txt = b[4].strip()
                 if re.match(r"^(Table|Tab\.|表)\b", txt, re.IGNORECASE):
                     continue
                 m = fig_pattern.search(txt)
                 if m:
+                    matched_idx.add(bi)
                     matched_str = m.group(1).strip()
                     num_m = re.search(r"\d+[a-zA-Z]?", matched_str)
                     fig_num = num_m.group(0).lower() if num_m else matched_str
@@ -45,7 +47,74 @@ class BaseAdapter:
                         "caption": caption_text,
                         "rect": fitz.Rect(b[0], b[1], b[2], b[3]),
                     })
+
+        # 行级救援（v1.7）：块首非题注、但块内行首为 "Figure N <长句>"（Annual Reviews 等
+        # 题注嵌在图例之后）。假阳防线：真题注上方必有图形，locate 的图形证据门会拒绝
+        # 上方为正文的段首引用（"Figure 2 shows..."）。
+        rescue_pat = re.compile(
+            r"^(Figure|Fig\.?)\s+(\d+[a-zA-Z]?)\s+([A-Z0-9(一-鿿].{24,})$")
+        label_pat = re.compile(r"^(Figure|Fig\.?)\s+(\d+[a-zA-Z]?)[:.]?$", re.IGNORECASE)
+        line_rects = None
+        for bi, b in enumerate(blocks):
+            if b[6] != 0 or bi in matched_idx:
+                continue
+            lines = [l.strip() for l in b[4].splitlines()]
+            for li, ln in enumerate(lines):
+                rm = rescue_pat.match(ln)
+                body = ln
+                if not rm:
+                    lm = label_pat.match(ln)
+                    if not lm:
+                        continue
+                    nxt = " ".join(x for x in lines[li + 1:li + 3] if x).strip()
+                    if len(nxt) < 25:
+                        # 纯标签独立成块（Annual Reviews）：向后借 1-2 个文本块首行
+                        for nb in blocks[bi + 1:bi + 3]:
+                            if nb[6] != 0:
+                                continue
+                            s = nb[4].strip().replace("\n", " ")
+                            if re.match(r"^(Table|Tab\.|表)\b", s, re.IGNORECASE):
+                                continue
+                            seg = " ".join(x.strip() for x in s.splitlines()[:1])[:200]
+                            if len(seg) >= 25 and re.match(r"^[A-Z0-9(一-鿿]", seg):
+                                nxt = (nxt + " " + seg).strip() if nxt else seg
+                            if len(nxt) >= 25:
+                                break
+                    if len(nxt) < 25 or not re.match(r"^[A-Z0-9(一-鿿]", nxt):
+                        continue
+                    rm = lm
+                    body = f"{ln} {nxt}"
+                if re.match(r"^(Table|Tab\.|表)\b", body, re.IGNORECASE):
+                    continue
+                if line_rects is None:
+                    line_rects = self._page_line_rects(page)
+                rect = line_rects.get(re.sub(r"\s+", " ", ln)[:80])
+                if rect is None:
+                    continue
+                captions.append({
+                    "fig_no": f"{rm.group(1)} {rm.group(2)}".strip(),
+                    "fig_num": rm.group(2).lower(),
+                    "caption": re.sub(r"\s+", " ", body),
+                    "rect": rect,
+                })
+                break
         return captions
+
+    @staticmethod
+    def _page_line_rects(page):
+        out = {}
+        try:
+            for blk in page.get_text("dict")["blocks"]:
+                for line in blk.get("lines", []):
+                    t = "".join(s.get("text", "") for s in line.get("spans", []))
+                    key = re.sub(r"\s+", " ", t).strip()
+                    if len(key) > 6 and key not in out:
+                        bb = line.get("bbox")
+                        if bb:
+                            out[key[:80]] = fitz.Rect(bb)
+        except Exception:
+            pass
+        return out
 
     def locate_figure_box(self, page: fitz.Page, cap_rect: fitz.Rect, valid_images: list,
                           page_drawings: list, text_spans: list = None) -> tuple:

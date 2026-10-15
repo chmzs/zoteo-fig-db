@@ -5,6 +5,8 @@ Handles all other publishers (AAAS/Science, Springer, Copernicus, SAGE, MDPI, et
 using generalized vector path and raster bounding box fusion.
 """
 
+import fitz  # noqa: F401  (match() 签名引用)
+
 from .base import BaseAdapter
 
 
