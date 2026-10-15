@@ -93,12 +93,15 @@ class BaseAdapter:
         # （懒计算：仅矢量渲染分支会解码整页文本层；位图直抽路径零成本）
         spans = text_spans
         if spans is None:
-            spans = [
-                fitz.Rect(s["bbox"])
-                for blk in page.get_text("dict")["blocks"]
-                for line in blk.get("lines", [])
-                for s in line.get("spans", [])
-            ]
+            try:
+                spans = [
+                    fitz.Rect(s["bbox"])
+                    for blk in page.get_text("dict")["blocks"]
+                    for line in blk.get("lines", [])
+                    for s in line.get("spans", [])
+                ]
+            except Exception:
+                spans = []
         elif callable(spans):
             spans = spans()
         if spans:

@@ -161,6 +161,13 @@ def resolve_abbr(journal, zot_abbr=""):
     return journal_abbr_str(j)
 
 
+def _so():
+    so = ort.SessionOptions()
+    so.intra_op_num_threads = 2
+    so.inter_op_num_threads = 1
+    return so
+
+
 class MiniLMEncoder:
     def __init__(self, model_dir=MODEL_DIR):
         self.model_path = os.path.join(model_dir, "model.onnx")
@@ -169,7 +176,11 @@ class MiniLMEncoder:
         with open(self.vocab_path, "r", encoding="utf-8") as f:
             for idx, line in enumerate(f):
                 self.vocab[line.strip()] = idx
-        self.session = ort.InferenceSession(self.model_path, providers=["CPUExecutionProvider"])
+        self.session = ort.InferenceSession(
+            self.model_path,
+            sess_options=_so(),
+            providers=["CPUExecutionProvider"],
+        )
 
     def tokenize(self, text, max_len=128):
         tokens = ["[CLS]"]
@@ -413,8 +424,12 @@ class FigureExtractor:
                         "rect": fitz.Rect(bb) if bb else None,
                     })
 
-            # 2. Collect all vector drawings on this page
-            page_drawings = page.get_drawings()
+            # 2. Collect all vector drawings on this page (graceful degrade on MuPDF
+            # "nested graphics states" style errors: raster evidence still works)
+            try:
+                page_drawings = page.get_drawings()
+            except Exception:
+                page_drawings = []
 
             for cap in captions_on_page:
                 fig_no_clean = re.sub(r"[^\w\d]", "_", cap["fig_no"])
