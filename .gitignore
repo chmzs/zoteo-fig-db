@@ -11,3 +11,6 @@ __pycache__/
 batch_state.json
 FINAL_DONE.json
 .manual_stop
+
+*.sqlite-journal
+nul
