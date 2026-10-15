@@ -1,0 +1,13 @@
+# 运行时数据与可再生文件（不同步）
+models/
+cache/
+batch_tmp/
+__pycache__/
+*.pyc
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+batch_state.json
+FINAL_DONE.json
+.manual_stop
