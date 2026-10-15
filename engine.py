@@ -432,6 +432,9 @@ class FigureExtractor:
                 page_drawings = []
 
             for cap in captions_on_page:
+                # 书目录点线行（"图21 xxx 41 ......"）不可能是真题注：≥4 连点即拒
+                if re.search(r"[.…·]{4,}", cap["caption"]):
+                    continue
                 fig_no_clean = re.sub(r"[^\w\d]", "_", cap["fig_no"])
                 webp_filename = f"{item_key}_{fig_no_clean}_p{page_idx+1}.webp"
                 webp_path = os.path.join(self.output_dir, webp_filename)
