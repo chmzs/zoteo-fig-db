@@ -16,7 +16,7 @@ sys.path.insert(0, BASE_DIR)
 from engine import FigureExtractor, MiniLMEncoder, FigureDB
 from PIL import Image
 
-WORKERS = 3
+WORKERS = 4
 
 
 def bbox_sanity(img_path):
