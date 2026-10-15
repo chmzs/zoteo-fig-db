@@ -58,7 +58,8 @@ class ChineseJournalsAdapter(BaseAdapter):
                     })
 
         if not raw_captions:
-            return []
+            # 块首全空时落到 base：行首救援 + 跨块纯标签行（扫描 OCR 层/混排版式）
+            return super().find_captions(page, page_idx)
 
         # Merge bilingual pairs (Chinese '图 N' + English 'Fig. N')
         merged_by_num = {}
