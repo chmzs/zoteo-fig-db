@@ -14,3 +14,4 @@ FINAL_DONE.json
 
 *.sqlite-journal
 nul
+*.sqlite-journal
