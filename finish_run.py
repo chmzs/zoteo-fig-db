@@ -24,13 +24,16 @@ def run_py(script):
 
 
 def main():
-    # 1. 救回隔离条目（修复后的降级代码重跑）
+    # 1. 救回 zero-fig 论文（并排/下方版式回退修复后重跑）
+    run_py("rescue_zero.py")
+
+    # 2. 救回隔离条目（修复后的降级代码重跑）
     run_py("reindex_quarantine.py")
 
-    # 2. 生成总结报告
+    # 3. 生成总结报告
     run_py("summarize_run.py")
 
-    # 3. 重启画廊服务（杀旧进程 -> 无浏览器后台拉起）
+    # 4. 重启画廊服务（杀旧进程 -> 无浏览器后台拉起）
     subprocess.run(
         ["powershell", "-NoProfile", "-Command",
          "Get-Process zoteo-fig-db -ErrorAction SilentlyContinue | Stop-Process -Force"],

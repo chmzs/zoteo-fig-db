@@ -105,6 +105,13 @@ class BaseAdapter:
             if clip_b is not None or raster_b is not None:
                 return clip_b, raster_b
 
+        # ---- 回退路径：题注与图左右并排（老刊侧置图注版式；限窄题注块）----
+        if cap_rect.width < page_rect.width * 0.5:
+            clip_s, raster_s = self._figure_beside_caption(
+                page, cap_rect, valid_images, page_drawings, text_spans)
+            if clip_s is not None or raster_s is not None:
+                return clip_s, raster_s
+
         # 两个方向都没有图形证据：假题注，拒绝，绝不盲裁
         return None, None
 
@@ -164,6 +171,51 @@ class BaseAdapter:
         u = self._merge_spans(page, u, text_spans, max(40.0, cap_rect.y1 - 2), bottom_lim, 14.0, 16.0)
         clip = fitz.Rect(max(25, u.x0 - 6), max(cap_rect.y1 - 2, u.y0 - 6),
                          min(page_rect.width - 25, u.x1 + 6), min(bottom_lim + 8, u.y1 + 6))
-        if clip.height < 60 or clip.width < 80:
-            return None, None
         return clip, None
+
+    def _figure_beside_caption(self, page, cap_rect, valid_images, page_drawings, text_spans):
+        """题注与图左右并排（老刊侧置图注/双联版式）。
+        守卫：仅窄题注块（调用方限制）、位图与题注纵向重叠 >=35%、距题注边 <=320pt、
+        排除整页扫描与超大 union，防误捕相邻联内容。"""
+        page_rect = page.rect
+        for side in ("right", "left"):
+            if side == "right":
+                win = fitz.Rect(cap_rect.x1 + 2, max(40.0, cap_rect.y0 - 25),
+                                min(page_rect.width - 25, cap_rect.x1 + 320.0),
+                                cap_rect.y1 + 25)
+                near = lambda r: r.x0 >= cap_rect.x1 - 12
+            else:
+                win = fitz.Rect(max(25.0, cap_rect.x0 - 320.0), max(40.0, cap_rect.y0 - 25),
+                                cap_rect.x0 - 2, cap_rect.y1 + 25)
+                near = lambda r: r.x1 <= cap_rect.x0 + 12
+            if win.x1 - win.x0 < 80 or win.y1 - win.y0 < 60:
+                continue
+            side_imgs = []
+            for vi in valid_images:
+                r = vi["rect"]
+                if not r or not near(r) or r.height > 540:
+                    continue
+                if not r.intersects(win):
+                    continue
+                ov = min(r.y1, win.y1) - max(r.y0, win.y0)
+                if ov > 0 and ov / max(1.0, r.height) >= 0.35:
+                    side_imgs.append(vi)
+            side_dr = [d["rect"] for d in page_drawings
+                       if near(d["rect"]) and d["rect"].intersects(win) and d["rect"].y0 >= 40]
+            if len(side_imgs) == 1 and not side_dr:
+                return None, side_imgs[0]
+            parts = [vi["rect"] for vi in side_imgs] + side_dr
+            if not parts:
+                continue
+            u = parts[0]
+            for r in parts[1:]:
+                u = u | r
+            if (u.y1 - u.y0) > 560:
+                continue
+            u = self._merge_spans(page, u, text_spans, 40.0, page_rect.height - 40.0, 12.0, 12.0)
+            clip = fitz.Rect(max(25, u.x0 - 6), max(40, u.y0 - 6),
+                             min(page_rect.width - 25, u.x1 + 6),
+                             min(page_rect.height - 40, u.y1 + 6))
+            if clip.height >= 60 and clip.width >= 80:
+                return clip, None
+        return None, None
