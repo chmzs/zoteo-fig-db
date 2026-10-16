@@ -28,3 +28,5 @@ reindex_targets.log
 scan_checkpoint.json
 scan_si2.log
 si_targets.json
+HANDOFF.md
+NIGHT_REPORT.md
