@@ -8,6 +8,7 @@ Handles Nature's distinct 'Fig. X | ...' caption syntax and grid layout.
 import re
 import fitz
 from .base import BaseAdapter
+from family_rules import journal_family
 
 
 class NatureAdapter(BaseAdapter):
@@ -24,7 +25,9 @@ class NatureAdapter(BaseAdapter):
             first_text = doc[0].get_text()[:600]
             return "nature" in first_text.lower()
         j_lower = journal.lower()
-        return any(k.lower() in j_lower for k in self.NATURE_KEYWORDS)
+        if any(k.lower() in j_lower for k in self.NATURE_KEYWORDS):
+            return True
+        return journal_family(journal) == "nature"
 
     def find_captions(self, page: fitz.Page, page_idx: int) -> list:
         blocks = page.get_text("blocks")

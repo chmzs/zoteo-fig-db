@@ -26,7 +26,9 @@ class ChineseJournalsAdapter(BaseAdapter):
             first_text = doc[0].get_text()[:600]
             return any(k in first_text for k in self.CHINESE_JOURNAL_KEYWORDS)
         j_upper = journal.upper()
-        return any(k.upper() in j_upper for k in self.CHINESE_JOURNAL_KEYWORDS)
+        if any(k.upper() in j_upper for k in self.CHINESE_JOURNAL_KEYWORDS):
+            return True
+        return any('一' <= c <= '鿿' for c in journal)
 
     def find_captions(self, page: fitz.Page, page_idx: int) -> list:
         blocks = page.get_text("blocks")

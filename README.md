@@ -30,7 +30,8 @@
 ```
 zoteo-fig-db/
 ├── engine.py          # 抽取/编码/检索/DB（核心库）
-├── adapters/          # 出版商适配器（nature/elsevier/agu/chinese/generic + 注册表路由）
+├── family_rules.py    # 出版商家族规则单一事实源（调度分组与提取路由共用）
+├── adapters/          # 出版商适配器（chinese/nature/elsevier/agu/plos/generic + 注册表按家族路由）
 ├── notes_index.py     # item_key→Obsidian 笔记双链映射；期刊简称合法性校验
 ├── indexer.py         # Zotero 扫描 + 主 PDF 优选 + 增量入库
 ├── server.py          # 零依赖画廊 + REST API（端口 5173）

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
+r"""
 PLOS Publisher Adapter (PLOS ONE / PLOS Biology / PLOS Medicine ...)
 特化点：题注句式 "Fig 1. xxx"——"Fig" 与数字之间没有点，数字后才有句点。
 base 超集要求 Fig. 带反斜杠点（Fig 带点）→ PLOS 题注全部漏配。本适配器把锚点改为
