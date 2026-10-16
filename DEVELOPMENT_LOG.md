@@ -15,7 +15,7 @@
 - v1.7：行级救援（题注与正文同行 merged line，Annual Reviews）——判据用"后续句是否大写开头/数字/括号"区分题注起始 vs 正文引用（"Figure 2 shows" 必须拒）
 - v1.9：字母编号 `Figure S1`；PLOS 用**数字后句点**判据区分题注（"Fig 3."）与正文引用（"Fig 3 presented"），13 篇零图全救活
 - v2.0：词式编号 `Supplementary Figure 12`/`Extended Data Figure 3`（Nature Communications SI 实测用词式，8→34 图）
-- 陷阱实录：加前缀时放非捕获组 → `matched_str=m.group(1)` 丢前缀 → "Supplementary Figure 1" 与正文 "Figure 1" 在 UNIQUE(item_key,fig_no) 下**静默撞车**。修复=捕获整条再 rstrip 分隔符。**动捕获组编号前必须先 grep 所有 m.group(N) 引用点。**
+- 陷阱实录：加前缀时放非捕获组 → `matched_str=m.group(1)` 丢前缀 → "Supplementary Figure 1" 与正文 "Figure 1" 在 UNIQUE(item_key,fig_no) 下**静默撞车**。修复=外层捕获整条 + `m.group(0)` + rstrip 分隔符。**动捕获组编号前必须先 grep 所有 m.group(N) 引用点；同一条正则被 nature 适配器独立复刻了一份——改基类正则必须 grep 全 adapters 找分身。**
 
 **1.5 拼接 PDF 与页数上限联动。** 用户习惯把 SI 拼接进正文 PDF（PassportPDF 等工具重编码）。改正则（S 编号）而不放开页数上限=白改。120 页上限的成本：全库重提 612 篇候选仅 ~55 分钟。
 
@@ -61,6 +61,8 @@
 - **API 改动必带 curl 测试套件**（T1-T9 全绿再 commit）
 - **断点续跑**：长任务每 200 条落 checkpoint（重启只补差额），链尾用 DONE 哨兵串接下一步
 - 默认值陷阱：`stamp.get(k, '2.0')` 把零行文献全跳过——**哨兵默认值必须落在"会被处理"的一侧**（改 '0.0'）
+- 模型切换/网络闪断时段的工具输出**不可信**：本档曾有三批"看似成功"的补丁实际未落盘（grep 现场=唯一裁判）；被打断的长链尾进程要用 targets 重算+排除已完成戳来幂等续跑
+- PowerShell 管道里匹配 bash 自身命令行会**自杀**（`-match 'chain_supfig'` 命中当前执行体）——先 `Get-Process` 列 PID 再按 PID 精确杀
 
 ## 6. 数字档案（2026-10-16 实测）
 
