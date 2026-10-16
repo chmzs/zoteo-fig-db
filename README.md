@@ -1,12 +1,12 @@
 # zoteo-fig-db
 
-**地学文献图库引擎** —— 从本地 Zotero 文库的 PDF 中批量抽取学术图表原图与题注（Caption），用 MiniLM 本地语义索引，提供人工检索画廊 + Agent API + 多模态视觉解读闭环。
+**地学文献图库引擎** —— 从本地 Zotero 文库的 PDF 中批量抽取学术图表原图与题注（Caption），用 multilingual-e5-small 本地语义索引（中英跨语言），提供人工检索画廊 + Agent API + 多模态视觉解读闭环。
 
 > 设计源流：Zhang J. (2025) *Small Language Models With Sentence-Level Corpus Offer Significant Potential for the Geoscience Community*, AGU *Perspectives of Earth and Space Scientists*（doi:10.1029/2025CN000283）。论文开源了句子级 MiniLM 检索范式；本项目实现其"图 ↔ 图注一一映射"的图表检索路线，并补全了论文未公开的部分：**PDF 版面级图体定位**、Obsidian/Zotero 工作流联动、视觉大模型消费闭环与 Windows 服务化。
 
 ## 核心特性
 
-- **零 Token 本地索引**：`all-MiniLM-L12-v2`（ONNX FP32，CPU 推理 ~160ms/句），不依赖任何云端 API
+- **零 Token 本地索引**：`multilingual-e5-small`（ONNX INT8 仅 118MB，CPU 推理，中英与跨语言统一空间），不依赖任何云端 API
 - **出版商适配器路由**：按**刊名**（非 publisher 字段）匹配 Nature/Elsevier/AGU/中文刊等图注句法；几何定位逻辑全在 base 共享
 - **图体精准定位**：单幅位图直抽原始字节；矢量图取 `矢量路径 ∪ 位图 ∪ 紧邻文本标注` 并集；**题注上方无图形证据即拒绝**（防"正文当图"）；表格全程排除
 - **双尺寸 WebP**：原图 ≤1600px q72（对齐视觉模型 ~1568px 有效上限）+ 480px 缩略图（画廊带宽降 ~75%）
@@ -19,7 +19,7 @@
 ## 快速开始（建你自己的图库）
 
 1. **环境**：Python ≥3.10 + `pymupdf` `pillow` `numpy` `onnxruntime`（本项目用 [pixi](https://pixi.sh) geo 环境）
-2. **模型**：下载 [all-MiniLM-L12-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L12-v2) 的 `onnx/model.onnx` 与 `vocab.txt`，放到 `models/all-MiniLM-L12-v2/`
+2. **模型**：下载 [multilingual-e5-small](https://huggingface.co/onnx-community/multilingual-e5-small) 的 `onnx/model_quantized.onnx`（改名 model_int8.onnx，~118MB）与 `tokenizer.json`，放到 `models/multilingual-e5-small/`
 3. **配置**：`indexer.py` 顶部 `ZOTERO_DIR` / `STORAGE_DIR` 指向你的 Zotero 数据目录（只读访问 `zotero.sqlite`，不写）
 4. **首次建库**：`python indexer.py --limit 20`，全库则 `python batch_master.py`
 5. **启动画廊**：`启动 zoteo-fig-db.bat`（或 `python server.py`）；Windows 保活：
@@ -42,7 +42,7 @@ zoteo-fig-db/
 ├── batch_worker.py    # 单批执行器（逐篇 jsonl 进度 + quarantine）
 ├── reindex_all.py     # 算法升级后全量重抽
 ├── watchdog.py        # 看门狗（端口体检 + detached 拉起，尊重 .manual_stop）
-├── models/            # [不入库] MiniLM ONNX 权重
+├── models/            # [不入库] e5-small INT8 ONNX 权重
 ├── cache/             # [不入库] webp 图 + 向量矩阵磁盘缓存 + 笔记映射缓存
 └── batch_tmp/         # [不入库] 批次中间产物
 ```

@@ -6,7 +6,7 @@
 
 ## 不变量（改动前必读）
 
-1. **图↔题注契约**：一切检索基于题注文本（MiniLM）+ FTS5。定位原则**宁宽勿裁，但绝不盲裁**——`adapters/base.locate_figure_box`：位图单幅直抽原始字节；矢量取路径∪位图∪6pt 内文本标注并集；**题注上方无图形证据→拒绝该候选**（防正文交叉引用/合并块假题注，2026-10-16 实测教训：Elsevier 双栏"图注并入正文块+整栏盲裁"会产出纯文字假图卡）。
+1. **图↔题注契约**：一切检索基于题注文本（e5-small）+ FTS5。定位原则**宁宽勿裁，但绝不盲裁**——`adapters/base.locate_figure_box`：位图单幅直抽原始字节；矢量取路径∪位图∪6pt 内文本标注并集；**题注上方无图形证据→拒绝该候选**（防正文交叉引用/合并块假题注，2026-10-16 实测教训：Elsevier 双栏"图注并入正文块+整栏盲裁"会产出纯文字假图卡）。
 2. **路由只认刊名**：`adapters/__init__.get_adapter(journal, doc)`，期刊条目 publisher 字段 83% 为空，禁止依赖。家族归属以 `family_rules.py`（JOURNAL_RULES/EXACT_FAMILY/journal_family）为**单一事实源**，batch_master 调度与适配器路由共用；特化家族（chinese/nature/elsevier/agu/plos）match() 判 `journal_family()==本族` + 关键词，其余走 generic。elsevier/agu 的 find_captions **直接继承 base 超集+行级救援**（句式无真实差异就不写特化正则，防窄化漏配）；nature 保留 pipe 句式特化+空则 super 兜底。新增家族=改 family_rules + 视句法证据加家族文件，`engine.py` 零改动。
 3. **单写者**：worker/master 串行写 sqlite；画廊 server 只读。矩阵缓存签名 `(count, MAX(indexed_at), MAX(id))` 自动失效；UPDATE 元数据列需连带 bump indexed_at 或删除 `cache/embed_*`。
 4. **去重**：DB `UNIQUE(item_key, fig_no)` + 检索侧 (title,fig_no) 去重；多条目同题（预印本/正式版并存）由后者兜住。

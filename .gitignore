@@ -15,3 +15,16 @@ FINAL_DONE.json
 *.sqlite-journal
 nul
 *.sqlite-journal
+
+_agu_db_top.webp
+_bench.py
+_dbg*.py
+_diag*.py
+_gov_version.py
+_p4_full.webp
+_strip_*.webp
+_strip_v6.webp
+reindex_targets.log
+scan_checkpoint.json
+scan_si2.log
+si_targets.json

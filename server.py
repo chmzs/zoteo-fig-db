@@ -603,6 +603,13 @@ HTML_CONTENT = """<!DOCTYPE html>
             document.getElementById('addrbar').textContent = '访问地址：' + d.urls.join('　·　') + '　（换网络后 IP 会变，overlay 地址恒定）';
         }).catch(() => {});
     </script>
+    <div id="backTop" title="回到顶部" style="position:fixed;right:18px;bottom:18px;z-index:900;display:none;width:42px;height:42px;border-radius:50%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;cursor:pointer;font-size:18px;line-height:42px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.45);user-select:none;">↑</div>
+    <script>
+        window.addEventListener('scroll', () => {
+            document.getElementById('backTop').style.display = window.scrollY > 700 ? 'block' : 'none';
+        }, { passive: true });
+        document.getElementById('backTop').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    </script>
 </body>
 </html>
 """

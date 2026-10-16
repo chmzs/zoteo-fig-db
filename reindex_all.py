@@ -12,7 +12,7 @@ import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureExtractor, Encoder, FigureDB, DB_PATH, IMAGE_DIR
+from engine import FigureExtractor, Encoder, FigureDB, DB_PATH, IMAGE_DIR, CURRENT_EXTRACTOR_VERSION
 from indexer import get_zotero_items_with_pdfs
 
 

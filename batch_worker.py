@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from engine import FigureExtractor, Encoder, FigureDB
+from engine import FigureExtractor, Encoder, FigureDB, CURRENT_EXTRACTOR_VERSION
 from PIL import Image
 
 WORKERS = 6

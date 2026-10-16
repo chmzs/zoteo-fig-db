@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Zotero GeoFigure Indexer (fig_db)
-Scans Zotero PDF attachments, extracts figures, encodes with MiniLM, saves to SQLite.
+Scans Zotero PDF attachments, extracts figures, encodes with multilingual-e5-small, saves to SQLite.
 
 条目附件选择规则:
 - 只处理 contentType='application/pdf'（EPUB/HTML 快照暂跳过：无图注结构，收益低，长期任务）

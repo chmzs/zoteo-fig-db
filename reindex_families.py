@@ -18,7 +18,7 @@ try:
 except Exception:
     pass
 
-from engine import FigureExtractor, Encoder, FigureDB, IMAGE_DIR
+from engine import FigureExtractor, Encoder, FigureDB, IMAGE_DIR, CURRENT_EXTRACTOR_VERSION
 from indexer import get_zotero_items_with_pdfs
 from adapters import get_adapter
 
@@ -27,7 +27,11 @@ FAMILIES = tuple(sys.argv[1].split(",")) if len(sys.argv) > 1 else ("elsevier", 
 
 def main():
     papers = get_zotero_items_with_pdfs(limit=None)
-    if FAMILIES and FAMILIES[0] == "all":
+    if FAMILIES and FAMILIES[0].endswith(".json"):
+        import json as _j
+        keys = set(_j.load(open(FAMILIES[0], encoding="utf-8")))
+        targets = [p for p in papers if p["item_key"] in keys]
+    elif FAMILIES and FAMILIES[0] == "all":
         targets = [p for p in papers if p.get("pdf_path")]
     else:
         targets = [p for p in papers
@@ -68,7 +72,7 @@ def main():
             db.insert_figure(f)
         print(f"{key} {p['journal'][:22]:22s} -> {len(figs)}", flush=True)
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=6) as pool:
         list(pool.map(redo, targets))
     print("REINDEX_FAMILIES_DONE", flush=True)
 
