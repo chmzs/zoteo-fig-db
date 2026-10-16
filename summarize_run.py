@@ -67,7 +67,11 @@ def main():
     lines += [
         "",
         "## 修复记录",
+        "- e5-small INT8 嵌入后端（中英跨语言统一空间；MiniLM 退役；A/B 人工验收胜出）",
+        "- 家族级完整路由（family_rules 单一事实源）+ PLOS 适配器（数字后句点判据）",
+        "- 页眉硬地板 y>=64（AGU logo/DOI 混入修复）+ SI 题注编号（Figure S1/图S2）+ 拼接长 PDF 解锁至 120 页",
         "- 假题注防御：题注上方无图形证据→拒绝（Elsevier 正文并入题注块问题）",
+        "- 检索深度：前端 top_k 100→500 逐轮加深；FTS 召回池 600；/api/urls 地址自答 + 回到顶部按钮",
         "- get_drawings / get_text(dict) 异常降级：MuPDF nested-graphics 不再整篇阵亡",
         "- onnxruntime 线程限 2 + WORKERS=4：吞吐 ~2x",
         "- 位图元数据免解码（get_image_info）：提取提速",
