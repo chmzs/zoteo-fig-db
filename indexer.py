@@ -9,6 +9,7 @@ Scans Zotero PDF attachments, extracts figures, encodes with multilingual-e5-sma
 """
 
 import os
+import tempfile
 import re
 import shutil
 import sqlite3
@@ -27,7 +28,7 @@ from engine import (
 
 ZOTERO_DIR = r"D:\Zotero"
 STORAGE_DIR = os.path.join(ZOTERO_DIR, "storage")
-TEMP_DB = r"C:\Users\chmzs\.dsh\temp_zotero_indexer.sqlite"
+TEMP_DB = os.path.join(tempfile.gettempdir(), f"zotero_fig_index_{os.getpid()}.sqlite")
 
 # 排除的 PDF（双语对照版 / 明显补充材料）
 EXCLUDE_RE = re.compile(

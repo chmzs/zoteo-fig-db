@@ -53,3 +53,6 @@ poison_scan.json
 poison_scan.log
 weekly_run1.log
 poison_failures.json
+supfig_targets.json
+supfig_remedy.json
+supfig_final.json
