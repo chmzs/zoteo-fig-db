@@ -8,6 +8,7 @@ from .chinese import ChineseJournalsAdapter
 from .nature import NatureAdapter
 from .elsevier import ElsevierAdapter
 from .agu import AGUAdapter
+from .plos import PLOSAdapter
 from .generic import GenericAdapter
 
 # Order matters: specific adapters first, GenericAdapter as fallback
@@ -16,6 +17,7 @@ ADAPTER_REGISTRY = [
     NatureAdapter(),
     ElsevierAdapter(),
     AGUAdapter(),
+    PLOSAdapter(),
     GenericAdapter(),
 ]
 

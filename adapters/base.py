@@ -117,7 +117,8 @@ class BaseAdapter:
         return out
 
     def locate_figure_box(self, page: fitz.Page, cap_rect: fitz.Rect, valid_images: list,
-                          page_drawings: list, text_spans: list = None) -> tuple:
+                          page_drawings: list, text_spans: list = None,
+                          all_captions: list = None) -> tuple:
         """定位题注上方的图形区域。返回 (clip Rect 或 None, 命中位图 dict 或 None)。
 
         原则：宁宽勿裁，但绝不盲裁。
@@ -138,7 +139,14 @@ class BaseAdapter:
             cx0, cx1 = 35.0, page_rect.width - 35.0
 
         # ---- 主路径：图形在题注上方（绝大多数出版商）----
-        band = fitz.Rect(cx0, 45.0, cx1, cap_rect.y0)
+        # 带顶：从同栏上一条题注底截断（单栏多图页防止把上一张图吞进本张并集）
+        band_top = 45.0
+        if all_captions:
+            for c2 in all_captions:
+                r2 = c2["rect"]
+                if r2 is not cap_rect and r2.y1 <= cap_rect.y0 - 5 and r2.x1 > cx0 and r2.x0 < cx1:
+                    band_top = max(band_top, r2.y1 + 3)
+        band = fitz.Rect(cx0, band_top, cx1, cap_rect.y0)
         band_imgs, band_dr = [], []
         if band.height >= 60:
             band_imgs = [vi for vi in valid_images

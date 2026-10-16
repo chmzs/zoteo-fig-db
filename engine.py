@@ -446,6 +446,7 @@ class FigureExtractor:
                     valid_images=valid_images,
                     page_drawings=page_drawings,
                     text_spans=None,
+                    all_captions=captions_on_page,
                 )
 
                 saved = False
