@@ -292,7 +292,7 @@ class FigureDB:
             record.get("page_no", 1),
             emb_blob,
             int(time.time()),
-            CURRENT_EXTRACTOR_VERSION  # v2.0: 全局版本戳单点（勿硬编码）,
+            CURRENT_EXTRACTOR_VERSION  # 全局版本戳单点引用,
         ))
         row_id = cursor.lastrowid
         cursor.execute("""
