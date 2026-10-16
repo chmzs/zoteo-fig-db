@@ -584,6 +584,12 @@ HTML_CONTENT = """<!DOCTYPE html>
         loadStats();
         document.getElementById('gallery').innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 60px 0;">输入关键词或点击上方快捷预设，开始语义检索图表</div>';
     </script>
+    <div style="text-align:center;color:#64748b;font-size:11px;padding:10px 0 16px;" id="addrbar"></div>
+    <script>
+        fetch('/api/urls').then(r => r.json()).then(d => {
+            document.getElementById('addrbar').textContent = '访问地址：' + d.urls.join('　·　') + '　（换网络后 IP 会变，overlay 地址恒定）';
+        }).catch(() => {});
+    </script>
 </body>
 </html>
 """
@@ -613,6 +619,13 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(json.dumps(stats, ensure_ascii=False).encode("utf-8"))
+            return
+
+        elif path == "/api/urls":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"urls": reachable_urls()}, ensure_ascii=False).encode("utf-8"))
             return
 
         elif path == "/api/search":
@@ -722,10 +735,25 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         pass
 
 
+def reachable_urls():
+    """本机全部可访问地址：回环 + 各网卡 IPv4（含 WLAN 与 xedTun 等 overlay）。"""
+    urls = [f"http://127.0.0.1:{PORT}"]
+    try:
+        import socket
+        for ip in sorted(set(socket.gethostbyname_ex(socket.gethostname())[2])):
+            if not ip.startswith("127.") and ip != "0.0.0.0":
+                urls.append(f"http://{ip}:{PORT}")
+    except Exception:
+        pass
+    return urls
+
+
 def run():
     server_address = ("0.0.0.0", PORT)
     httpd = ThreadingHTTPServer(server_address, ZoteoFigHandler)
     print(f"zoteo-fig-db running at http://0.0.0.0:{PORT}")
+    for u in reachable_urls():
+        print(f"  reachable: {u}")
 
     # Auto-open browser when port is ready
     if os.environ.get("NO_BROWSER", "0") != "1":
