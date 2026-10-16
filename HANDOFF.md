@@ -1,32 +1,30 @@
 # HANDOFF — zoteo-fig-db（覆盖写，勿追加）
 
-## 停滞断点（2026-10-16 11:20）
-- **任务**：Granite-embedding-97m-multilingual-r2 INT8 切换（用户已批准，收益=中文/跨语言检索，MTEB-ML 60.3 vs e5-small 50.9）。模型文件已下载、`validate_granite.py`(GraniteEncoder: tokenizers+CLS+L2) 已写，**卡在分词→推理链路崩溃，未跑通**。
-- 分词本身已验证 OK：EN/JA/ZH `unk=0`、BOS=179934、EOS=179938。
-- 崩溃点：`q @ p.T` 矩阵乘静默死进程 → **pixi 装 tokenizers 触发环境重解（py3.15→3.14.8）致 numpy2.5.4 conda 构建 BLAS 损坏**；pip 强制重装 numpy 已修复（MATMUL_OK），但 `validate_granite.py` 在修复后**尚未重跑**（会话多次被截断）。
-- 附带 damage 已修：画廊服务已重启（stats 12995/2212 ✓、检索 ✓）；`zoteo-fig-db.exe` 已按新 pythonw 重克隆；旧 GeoFigureServer.exe 删除；reindex_families 596/596 完成；night 批次 FINAL_DONE ✓。
+## 停滞断点（2026-10-16 13:48）
+- **正在跑**：AGU 家族重跑 `reindex_families.py agu_wiley`（82 篇，日志 `reindex_agu2.log`，第 1 次在 73/82 死于 `database is locked`，已停画廊服务重跑，约 13:56 完成，PID 查询 `reindex_families`）。目的：把 v1.8「页眉硬地板 y≥64 + band_dr 排 y1≤64 + header_guard 标注」落入 AGU 存量（用户投诉 logo/DOI 页眉与正文混入图体，ZBS8JUZV Fig2 实证修复后 1531→1057px 顶干净）。
+- **重跑完成后待办**：①重启画廊（`NO_BROWSER=1 nohup zoteo-fig-db.exe server.py`）；②目检 `ZBS8JUZV` DB 内 Figure 2 应为 ver=1.8 且顶条无页眉；③本卡片改写为"无事/新断点"。
+- e5-small INT8 嵌入后端**已切换完成**（`engine.Encoder`，MiniLM 零残留，旧向量备份 `zotero-figures.sqlite.minilm-bak`；A/B 三报告 `ab_report*.txt`，Granite↔e5 一致率 27% 但人工判 e5 中文组更净，故弃 Granite——其社区 int8 导出坍缩/fp16 拒载/390MB 超标）。
 
 ## 一键验证
-```
+```bash
 cd /d/Zotero/fig_db
-"/d/Users/chmzs/Documents/Pixi_env/.pixi/envs/geo/python.exe" -u validate_granite.py   # 期望 GOLDEN: PASS（diag≥0.8 且行最大，卡称 0.8869/0.9577/0.9112）
-curl -s http://127.0.0.1:5173/api/stats                                               # 服务活着
-grep REINDEX_FAMILIES_DONE reindex_families.log                                        # 后台批完成
+grep REINDEX_FAMILIES_DONE reindex_agu2.log                                   # 重跑完成标志
+curl -s "http://127.0.0.1:5173/api/stats"                                     # 服务+规模
+curl -s "http://127.0.0.1:5173/api/search?q=%E5%85%A8%E6%96%B0%E4%B8%96&top_k=3" | head -c 300  # 中文语义检索
 ```
-
-## 下一步原子动作
-1. 跑上面 validate：GOLDEN PASS → 写 `ab_granite.py`（全库 12995 caption Granite 编码入缓存 + 20 查询[10中10英]与 MiniLM top5 并排对比）→ 交用户目检定夺是否切换；切换=新 encoder + 全库重嵌入（~20min）+ bump extractor_version。
-2. 若 validate 仍 rc=127 无输出：`-u` 与 `python -X faulthandler` 重跑取证，重点查 onnxruntime 1.31 与 numpy2.5 pip 构建 ABI。
 
 ## 试错黑名单（严禁重踩）
-- **pixi global install 任何包都可能重解 geo 环境**（本次 py3.15→3.14 + BLAS 损坏 + python315.dll 消失 → pythonw 克隆 exe 全悬空）。装前备份 `pixi global list`，装后必测 `matmul` + exe 可启动。
-- `python -c` 崩溃丢缓冲输出＝假"无输出"；诊断脚本一律 `-u` 或 stderr 打印。
-- Windows python 不认 Git-Bash `/tmp`；bash 单条 sleep>110s 会被 120s 超时杀（要等就拆多次或用 timeoutMs）。
-- PowerShell 串里 `$_` 要 `\$_`；FTS5 external-content 禁直接 DELETE（try/except+rebuild）。
-- 未经用户同意不改 engine.py 主编码器（先 A/B）。
+- **pixi global install 任何包会重解 geo 环境**（py3.15→3.14、numpy/BLAS 静默崩、python315.dll 消失→克隆 exe 悬空）。装前想清楚；现环境 3.14.8 全链路已验证，勿动。
+- `python -c`/管道吞缓冲输出＝假"无输出"；诊断一律 `-u`。Git Bash `/tmp` Windows python 不认。
+- 4 线程 sqlite 并发写需 `busy_timeout=30`（已入 engine.get_conn）；重跑批量期间**停画廊**避免读锁竞争。
+- Granite 类新架构模型的社区 int8/fp16 导出不可信（量化坍缩实锤），要必须自量化+黄金矩阵验收。
+- edit 工具 new/old 参数顺序盯三遍；heredoc 里 `''` 双单引号=空串陷阱（chinese.py 事故）。
 
-## 关键文件
-- `engine.py`(v1.7 抽取/MiniLM/检索) `adapters/`(6 族路由+family_rules) `server.py`(0.0.0.0:5173)
-- `models/granite-embedding-97m-multilingual-r2/`(model_int8.onnx 97.9MB+tokenizer.json)
-- `validate_granite.py`(待跑通) · `reindex_families.py`(完成) · `finish_run.py`(收尾链)
-- GitHub: chmzs/zoteo-fig-db（代码已推，models/cache 不入库）· 看门狗计划任务 `zoteo-fig-db-watchdog`
+## 下一步原子动作
+1. `tail -f` 等 DONE → 起服务 → `read_image` ZBS8JUZV Fig2 顶条复核 → git 收尾。
+2. 用户若报其他家族页眉混入：`reindex_families.py copernicus`（Biogeosciences 的 clip.y0=40.9 同症状，97 图/13 篇待重跑——**已发现未处理**）。
+
+## 关键状态
+- DB：~13008 图 / 2212+ 篇，e5 向量 100%；服务 PID：重跑完成后新起；看门狗任务 `zoteo-fig-db-watchdog` 武装。
+- 地址：本机/Agent 恒 127.0.0.1:5173；跨设备 overlay 100.64.0.10:5173（`/api/urls` 自答）；检索深度前端 100→500 自适应，API 上限 500。
+- 远端：github.com/chmzs/zoteo-fig-db 已同步（13:47）。
