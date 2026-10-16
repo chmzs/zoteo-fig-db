@@ -6,7 +6,7 @@ Zotero GeoFigure Engine (fig_db)
 - Precise bounding box detection via vector drawings + raster images (Zero text pollution)
 - Bilingual Caption Merging (Chinese '图 N' + English 'Fig. N')
 - High-Quality WebP (quality=85) Storage
-- ONNX MiniLM Embedding & SQLite FTS5 Hybrid Search
+- e5-small INT8 Embedding & SQLite FTS5 Hybrid Search
 """
 
 import os
@@ -22,7 +22,7 @@ import onnxruntime as ort
 from adapters import get_adapter
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(BASE_DIR, "models", "all-MiniLM-L12-v2")
+MODEL_DIR = os.path.join(BASE_DIR, "models", "multilingual-e5-small")
 DB_PATH = os.path.join(BASE_DIR, "zotero-figures.sqlite")
 IMAGE_DIR = os.path.join(BASE_DIR, "cache", "figures")
 CURRENT_EXTRACTOR_VERSION = "1.7"
@@ -168,81 +168,44 @@ def _so():
     return so
 
 
-class MiniLMEncoder:
+class Encoder:
+    """multilingual-e5-small INT8（118MB，MIT）：mean pooling + L2；query/passage 前缀。
+    中英文/跨语言统一空间；换模型只改本类与 MODEL_DIR，调用点名字稳定。"""
+
     def __init__(self, model_dir=MODEL_DIR):
-        self.model_path = os.path.join(model_dir, "model.onnx")
-        self.vocab_path = os.path.join(model_dir, "vocab.txt")
-        self.vocab = {}
-        with open(self.vocab_path, "r", encoding="utf-8") as f:
-            for idx, line in enumerate(f):
-                self.vocab[line.strip()] = idx
+        from tokenizers import Tokenizer
+        self.tok = Tokenizer.from_file(os.path.join(model_dir, "tokenizer.json"))
+        self.tok.enable_truncation(256)
         self.session = ort.InferenceSession(
-            self.model_path,
+            os.path.join(model_dir, "model_int8.onnx"),
             sess_options=_so(),
             providers=["CPUExecutionProvider"],
         )
 
-    def tokenize(self, text, max_len=128):
-        tokens = ["[CLS]"]
-        for word in text.lower().split():
-            word = word.strip(".,!?:;\"'()[]{}")
-            if not word:
-                continue
-            if word in self.vocab:
-                tokens.append(word)
-            else:
-                sub = word
-                sub_tokens = []
-                while sub:
-                    found = False
-                    for end in range(len(sub), 0, -1):
-                        piece = sub[:end]
-                        if sub_tokens:
-                            piece = "##" + piece
-                        if piece in self.vocab:
-                            sub_tokens.append(piece)
-                            sub = sub[end:]
-                            found = True
-                            break
-                    if not found:
-                        sub_tokens = ["[UNK]"]
-                        break
-                tokens.extend(sub_tokens)
-
-        tokens = tokens[: max_len - 1] + ["[SEP]"]
-        input_ids = [self.vocab.get(t, self.vocab["[UNK]"]) for t in tokens]
-        attention_mask = [1] * len(input_ids)
-        token_type_ids = [0] * len(input_ids)
-
-        pad_len = max_len - len(input_ids)
-        input_ids.extend([self.vocab["[PAD]"]] * pad_len)
-        attention_mask.extend([0] * pad_len)
-        token_type_ids.extend([0] * pad_len)
-
-        return (
-            np.array([input_ids], dtype=np.int64),
-            np.array([attention_mask], dtype=np.int64),
-            np.array([token_type_ids], dtype=np.int64),
-        )
-
-    def encode(self, text):
+    def _vec(self, text, prefix):
         if not text or not text.strip():
             return np.zeros(384, dtype=np.float32)
-        inp_ids, att_mask, tok_types = self.tokenize(text)
+        enc = self.tok.encode(prefix + text)
+        ids = np.array([enc.ids], dtype=np.int64)
+        mask = np.ones_like(ids)
         outputs = self.session.run(None, {
-            "input_ids": inp_ids,
-            "attention_mask": att_mask,
-            "token_type_ids": tok_types,
+            "input_ids": ids,
+            "attention_mask": mask,
+            "token_type_ids": np.zeros_like(ids),
         })
-        token_embeddings = outputs[0]
-        mask = att_mask[..., np.newaxis]
-        sum_embeddings = np.sum(token_embeddings * mask, axis=1)
-        sum_mask = np.clip(mask.sum(axis=1), a_min=1e-9, a_max=None)
-        embedding = sum_embeddings / sum_mask
+        m = mask[..., np.newaxis].astype(np.float32)
+        embedding = (outputs[0] * m).sum(axis=1) / np.clip(m.sum(axis=1), a_min=1e-9, a_max=None)
         norm = np.linalg.norm(embedding, axis=1, keepdims=True)
         if norm[0, 0] > 0:
             embedding = embedding / norm
         return embedding[0].astype(np.float32)
+
+    def encode(self, text):
+        return self._vec(text, "passage: ")
+
+    def encode_query(self, text):
+        return self._vec(text, "query: ")
+
 
 
 class FigureDB:
@@ -498,14 +461,14 @@ class FigureExtractor:
 class FigureSearcher:
     """Hybrid two-stage search with numpy matrix cache for large libraries (10k+ figures).
 
-    Stage 1: MiniLM cosine similarity via single BLAS matmul over cached matrix
+    Stage 1: e5 cosine similarity via single BLAS matmul over cached matrix
              + FTS5 keyword recall (OR of query terms) to catch exact phrases.
     Stage 2: Keyword-bonus reranking only on the merged candidate set (~top 400).
     """
 
     def __init__(self, db_path=DB_PATH, model_dir=MODEL_DIR):
         self.db = FigureDB(db_path)
-        self.encoder = MiniLMEncoder(model_dir)
+        self.encoder = Encoder(model_dir)
         self._M = None            # (N, 384) float32 matrix（冷启动时 mmap 加载）
         self._metas = None        # list of dicts
         self._id2idx = None       # figures.id -> row index
@@ -675,7 +638,7 @@ class FigureSearcher:
 
         from notes_index import make_wikilink, clean_wikilink_alias
 
-        q_emb = self.encoder.encode(query)
+        q_emb = self.encoder.encode_query(query)
         sims = self._M @ q_emb
 
         n = len(self._metas)

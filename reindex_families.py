@@ -18,7 +18,7 @@ try:
 except Exception:
     pass
 
-from engine import FigureExtractor, MiniLMEncoder, FigureDB, IMAGE_DIR
+from engine import FigureExtractor, Encoder, FigureDB, IMAGE_DIR
 from indexer import get_zotero_items_with_pdfs
 from adapters import get_adapter
 
@@ -33,7 +33,7 @@ def main():
 
     db = FigureDB()
     ex = FigureExtractor()
-    enc = MiniLMEncoder()
+    enc = Encoder()
 
     def redo(p):
         key = p["item_key"]

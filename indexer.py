@@ -17,7 +17,7 @@ import shutil
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureExtractor, MiniLMEncoder, FigureDB, DB_PATH, resolve_abbr, _display_authors, zot_abbr_plausible
+from engine import FigureExtractor, Encoder, FigureDB, DB_PATH, resolve_abbr, _display_authors, zot_abbr_plausible
 
 ZOTERO_DIR = r"D:\Zotero"
 STORAGE_DIR = os.path.join(ZOTERO_DIR, "storage")
@@ -190,7 +190,7 @@ def _finalise_abbr(results):
 
 def index_papers(papers, force_reindex=False):
     extractor = FigureExtractor()
-    encoder = MiniLMEncoder()
+    encoder = Encoder()
     db = FigureDB()
 
     total_extracted = 0

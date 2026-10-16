@@ -1,0 +1,282 @@
+# e5-small(int8) vs MiniLM —— 20 查询 top-5 对比
+
+## Q: 全新世温度重建   (overlap 0/5)
+  e5:
+    [0.904] Nature Geoscience  图4         图4 | KC δ18O与模型和代用重建的全新世地表温度比较。a，复合 KC δ18O（深蓝色）与我们在洞
+    [0.901] 中国科学:地球科学          图7         图7 全球及中国全新世温度变化
+    [0.899] 中国科学: 地球科学         图3         图3 (网络版彩图)青藏高原全新世温度变化
+    [0.898] 中国科学:地球科学          图3         图3 基于不同代用指标组合重建的北半球(NH)、南半球(SH)和全球(GL)年平均温度变化
+    [0.898] 中国科学: 地球科学         图3         图3 全球及区域尺度指标记录、模式模拟和数据同化的 全新世持续升温模式的代表曲线及可能驱动机制
+  MiniLM:
+    [1.000]                    图2         图2.2是利用三江平原地区富锦、佳木斯、桦南、宝清、虎林、鸡西等气象
+    [1.000] Earth-Science Revi 图7         图7.喜马拉雅高原全新世古气候记录的空间分布，显示了不同的水文气候模式。
+    [1.000] Quaternary Science 图4         图4.全新世四个不同时期沙漠中部亚洲和季风亚洲的有效湿度变化空间模式（站点与图1相同）。里海数据来自Overe
+    [1.000] Quaternary Science 图4         图4.使用MAT（上）和WA（下）对挪威海阶地有孔虫记录中的三个随机变量进行重建。
+    [1.000] Quaternary Science 图2         图2.(a)硅藻数据集的pH变差图及其拟合变差模型；(b)底栖有孔虫数据集的盐度变差图及其拟合变差模型；(c)
+
+## Q: 夏季风 千年尺度变化   (overlap 0/5)
+  e5:
+    [0.921] 科学通报               图3         图3  温度变化的千年尺度周期
+    [0.904]                    图
+１        图 １ －４末次盛冰期里中全新世东亚夏季风雨帯的位置变化 （引自Ｙａｎｇ等 （２０１５ ） 和杨石岭  
+    [0.902] 中国科学: 地球科学         图2         图2  过去2000 a 的百年尺度温度变化速率
+    [0.902] 中国科学: 地球科学         图9         图9 全新世东亚夏季风和中纬度西风环流变化
+    [0.899] 中国科学: 地球科学         图4         图4  过去500 年的10 a 尺度温度变化
+  MiniLM:
+    [1.000] 中国科学:地球科学          图5         图5 赛里木湖记录的降水变化与北大西洋涛动及太阳活动
+    [1.000] 中国科学:地球科学          图4         图4 赛里木湖记录的降水变化与中亚东部地区对比
+    [1.000] 中国科学:地球科学          图3         图3 赛里木湖SLM13-2-1孔多指标记录的气候变化
+    [1.000] 第四纪研究              图１         图１　植被调查示意图
+    [1.000] 第四纪研究              图６         图６　部分果树类木炭横切面显微结构照片
+
+## Q: 粉尘 沉积 记录   (overlap 0/5)
+  e5:
+    [0.892]                    图6         图6 选用的花粉产量研究区和沉积记录样点分布
+    [0.886] 中国科学:地球科学          图2         图2 24000cal a BP以来基于中国北部和中部46个沉积物记录的栎属花粉百分含量的变化
+    [0.885] 第四纪研究              图７         图７　昂仁金错沉积记录与其他区域记录的对比
+    [0.884] 地理科学               图4         图4 河流沉积物样品孢粉百分含量图谱
+    [0.882] 第四纪研究              图１         图１　图强剖面沉积物取样地点
+  MiniLM:
+    [1.000] 人类学学报              图1         图1 江西沟2 号遗址及其青海湖盆地全新世中期主要史前遗址图
+    [1.000] 中国科学:地球科学          图6         图6     ZB10-C14岩芯主要孢粉类型(a)与样品(b)主成分 分析结果
+    [1.000] 第四纪研究              图３         图３　过去２０００年达则错的温度记录（ａ）与δＤｗａｘ记录（ｂ） ［７］
+    [1.000] 应用生态学报             图1         图1 长花马先蒿种群采集位点和单倍型空间分布 ［12］
+    [1.000] 中国科学:地球科学          图7         图7 青藏高原草原带和荒漠带优势花粉类群相对丰度和 花粉比值
+
+## Q: 珊瑚 海平面   (overlap 0/5)
+  e5:
+    [0.880]                    图5         图5.3 7000 年来MPI-ESM 中不同海域 (a) SST 和海冰面积均值变化曲线以及(b)散点拟合图,
+    [0.877] AGU Advances       图11        图11.(a)1951‑2024年北大西洋表层平均（0‑200米）盐度异常的PC1空间相关模式。星号表示在9
+    [0.876]                    图2         图2.54 海陆起伏曲线
+    [0.870] 中国科学: 地球科学         图4         图4 海表面USLH (a)和0~700m的OHC (b)在强弱AMOC 年的合成差值场
+    [0.869] AGU Advances       图4         图4.该示意图展示了北大西洋海表温度变化与印度季风降雨重组之间的大气响应链，夏季顶部有理想化的正弦形 纬向流扰
+  MiniLM:
+    [0.717]                    图2         图2.29 格陵兰冰峰GISP2 冰心记录的全新世火山硫酸盐序列（与本底变化之间的异常）。引自Zielinski
+    [0.717]                    图11        图11 中国北方6k 以来典型时段落叶阔叶林空间分布特征
+    [0.717]                    图7         图7 中国北方6k 以来典型时段的落叶阔叶林景观盖度
+    [0.717]                    图8         图8 中国北方6k 以来典型时段的针叶林景观盖度
+    [0.717]                    图12        图12 中国北方6k 以来典型时段针叶林空间分布特征
+
+## Q: 花粉 植被 分辨率   (overlap 0/5)
+  e5:
+    [0.919] 干旱区地理              图2         图2　不同植被类型下主要花粉的百分含量（Ａ／Ｃ曲线为对数标尺）
+    [0.913] 中国科学: 地球科学         图9         图9 主要花粉类型百分含量与植被盖度的关系图
+    [0.912] 科学通报               图2         图2 研究区花粉组合及植被组成. (a) 花粉百分比(%); (b) 0~100 m植被组成(m2/m2×100
+    [0.911]                    图5         图5 大兴安岭植被RSAP（400 米）范围内花粉百分比与原始植被丰度
+    [0.910] 中国科学:地球科学          图5         图5 主要花粉类型与植被对应关系
+  MiniLM:
+    [1.000] 人类学学报              图1         图1 江西沟2 号遗址及其青海湖盆地全新世中期主要史前遗址图
+    [1.000] 中国科学:地球科学          图6         图6     ZB10-C14岩芯主要孢粉类型(a)与样品(b)主成分 分析结果
+    [1.000] 第四纪研究              图３         图３　过去２０００年达则错的温度记录（ａ）与δＤｗａｘ记录（ｂ） ［７］
+    [1.000] 应用生态学报             图1         图1 长花马先蒿种群采集位点和单倍型空间分布 ［12］
+    [1.000] 中国科学:地球科学          图7         图7 青藏高原草原带和荒漠带优势花粉类群相对丰度和 花粉比值
+
+## Q: 同位素 分馏 温度   (overlap 0/5)
+  e5:
+    [0.889] 中国科学: 地球科学         图 4        图 4   基于δ 18O（蓝色）与δD（橙色）同位素组成计算得出的蒸发/入流比
+    [0.885] Nature Geoscience  图1         图1 | 稳定同位素和年代学分析结果。a, δ18O值来自KC‑1（蓝线）和 KC‑3（红线；已调整，见方
+    [0.878]                    图5         图5.1 C3、C4 植物碳同位素组成分布直方图
+    [0.877] 地球科学与环境学报          图３         图３　基于已知水温对碳酸盐团簇同位素（Δ４７）标定曲线
+    [0.874] 科学通报               图7         图7  (网络版彩色)植物残体碳同位素序列与哈巴河夏季温度以及喀纳斯地区冬季温度对比. (a) 哈巴河气象站19
+  MiniLM:
+    [1.000] 人类学学报              图1         图1 江西沟2 号遗址及其青海湖盆地全新世中期主要史前遗址图
+    [1.000] 中国科学:地球科学          图6         图6     ZB10-C14岩芯主要孢粉类型(a)与样品(b)主成分 分析结果
+    [1.000] 第四纪研究              图３         图３　过去２０００年达则错的温度记录（ａ）与δＤｗａｘ记录（ｂ） ［７］
+    [1.000] 应用生态学报             图1         图1 长花马先蒿种群采集位点和单倍型空间分布 ［12］
+    [1.000] 中国科学:地球科学          图7         图7 青藏高原草原带和荒漠带优势花粉类群相对丰度和 花粉比值
+
+## Q: 冰芯 温室气体   (overlap 0/5)
+  e5:
+    [0.902] 科学通报               图1         图1  冰芯记录中包含的气候环境变化指标  Figure 1  Climatic and environment
+    [0.902] 科学通报               图1         图1  目前已提供底部绝对年代信息的青藏高原冰芯钻取点位置示意图. 除古里雅冰芯外, 其他冰芯下面的数字是各自冰
+    [0.895] 第四纪研究              图３         图３　（ａ）ＧＩＳＰ２冰芯重建温度 ［９９］；（ｂ）中亚地区１０ｃａｌ.ｋａＢ．Ｐ．以来 １４Ｃ数据的总和概率密
+    [0.894] 科学通报               图2         图2  古里雅冰芯(a)和崇测冰芯(b)的δ  18O 剖面. 崇测冰芯灰线为原始数据, 红线为与古里雅冰芯已发
+    [0.891] Nature Geoscience  图2         图2 | 全新世气候动力学与KC δ18O相关概述。a,LIS的面积范围相 对于末次盛冰期最大值32。b,
+  MiniLM:
+    [1.000] 中国科学:地球科学          图5         图5 赛里木湖记录的降水变化与北大西洋涛动及太阳活动
+    [1.000] 中国科学:地球科学          图4         图4 赛里木湖记录的降水变化与中亚东部地区对比
+    [1.000] 中国科学:地球科学          图3         图3 赛里木湖SLM13-2-1孔多指标记录的气候变化
+    [1.000] 第四纪研究              图１         图１　植被调查示意图
+    [1.000] 第四纪研究              图６         图６　部分果树类木炭横切面显微结构照片
+
+## Q: 植被起火 生物群系   (overlap 0/5)
+  e5:
+    [0.893] 地理科学进展             图1         图1 植物群落天然性程度与
+    [0.891] 中国科学: 地球科学         图2         图2     生物群区化和主成分分析(PCA)界定的全新世植被突变
+    [0.891] 第四纪研究              图９         图９　炭屑指示的人类引发火灾与植被更替类型
+    [0.890]                    图1         图1.植被与大气之间的相互作用（生物地球物理和生物地球化学过程。根据Foley等 人（2003年）的图修改，鸣
+    [0.889] 生态学报               图6         图6 不同潜在植被类型区域草地生物量影响因素分析
+  MiniLM:
+    [1.000] 中国科学:地球科学          图5         图5 赛里木湖记录的降水变化与北大西洋涛动及太阳活动
+    [1.000] 中国科学:地球科学          图4         图4 赛里木湖记录的降水变化与中亚东部地区对比
+    [1.000] 中国科学:地球科学          图3         图3 赛里木湖SLM13-2-1孔多指标记录的气候变化
+    [1.000] 第四纪研究              图１         图１　植被调查示意图
+    [1.000] 第四纪研究              图６         图６　部分果树类木炭横切面显微结构照片
+
+## Q: 洞穴次生 石笋 氧同位素   (overlap 0/5)
+  e5:
+    [0.914] Nature Geoscience  图3         图3 | 全新世变暖的大陆替代记录。来自俄罗斯基德琳斯卡亚洞穴δ18的 洞穴石笋O同位素标准化时间序列（a），罗
+    [0.904] 第四纪研究              图２         图２　祥龙洞洞穴平面图，黑色圆点表示石笋ＸＬ２的采样位置
+    [0.900] 海洋地质与第四纪地质         图 5        图 5    末次冰期亚洲季风区洞穴石笋δ18O 记录所在位置图
+    [0.899] 中国科学:地球科学          图6         图6 石笋HC2的碳氧同位素和微量元素结果
+    [0.899] 第四纪研究              图７         图７　祥龙洞石笋ＸＬ２（ｂ）与董哥洞石笋ＤＡＳ ［３４］（ｃ）、和尚
+  MiniLM:
+    [1.000] 人类学学报              图1         图1 江西沟2 号遗址及其青海湖盆地全新世中期主要史前遗址图
+    [1.000] 中国科学:地球科学          图6         图6     ZB10-C14岩芯主要孢粉类型(a)与样品(b)主成分 分析结果
+    [1.000] 第四纪研究              图３         图３　过去２０００年达则错的温度记录（ａ）与δＤｗａｘ记录（ｂ） ［７］
+    [1.000] 应用生态学报             图1         图1 长花马先蒿种群采集位点和单倍型空间分布 ［12］
+    [1.000] 中国科学:地球科学          图7         图7 青藏高原草原带和荒漠带优势花粉类群相对丰度和 花粉比值
+
+## Q: 湖相 沉积 纹层   (overlap 0/5)
+  e5:
+    [0.907] 第四纪研究              图5 (Fig. 5) 图5 洪积相和湖沼相沉积特征对比 | Fig. 5 Comparison of sedimentary char
+    [0.905] 科学通报               图3         图3  4 个湖泊表层沉积物花粉百分比(单位: %)
+    [0.901] 中国科学(D辑:地球科学)      图4         图4  苏干湖沉积物近150 a 来210Pb 年龄和纹泥计年对比
+    [0.899] 科学通报               图4         图4  湖泊表层沉积物花粉浓度空间分布特征
+    [0.897] 中国科学(D辑:地球科学)      图3         图3  沉积物收集装置获得的2004 年6~11 月湖泊沉积物的电子显微镜扫描图
+  MiniLM:
+    [1.000] 人类学学报              图1         图1 江西沟2 号遗址及其青海湖盆地全新世中期主要史前遗址图
+    [1.000] 中国科学:地球科学          图6         图6     ZB10-C14岩芯主要孢粉类型(a)与样品(b)主成分 分析结果
+    [1.000] 第四纪研究              图３         图３　过去２０００年达则错的温度记录（ａ）与δＤｗａｘ记录（ｂ） ［７］
+    [1.000] 应用生态学报             图1         图1 长花马先蒿种群采集位点和单倍型空间分布 ［12］
+    [1.000] 中国科学:地球科学          图7         图7 青藏高原草原带和荒漠带优势花粉类群相对丰度和 花粉比值
+
+## Q: Holocene temperature reconstruction   (overlap 1/5)
+  e5:
+    [0.919] Nature             Fig. 3     Fig. 3 | Holocene warming driven by retreating ice sheet
+    [0.915] Quaternary Science Fig. 5     Fig. 5. Reconstructed and simulated annual-mean temperat
+    [0.913] Journal of Geophys Figure 4   Figure 4. Records showing warming during the middle to l
+    [0.911] Quaternary Science Fig. 9     Fig. 9. Comparison of Holocene temperature changes based
+    [0.909] Global and Planeta Fig. 6     Fig. 6. Comparison of potential continental annual/winte
+  MiniLM:
+    [0.785] 地理学报               图1 (Fig. 1) 图1 全新世温度及其他研究记录对比 | Fig. 1 Comparison of the Holocene te
+    [0.769] Nature             Fig. 3     Fig. 3 | Holocene warming driven by retreating ice sheet
+    [0.763] Quaternary Science Fig. 1     Fig. 1. Comparisons of global and large regional Holocen
+    [0.761] Global and Planeta Fig. 10    Fig. 10. Comparison of the Holocene temperatures reconst
+    [0.754] Climate of the Pas Figure 13  Figure 13. Comparison of Holocene temperature reconstruc
+
+## Q: Asian summer monsoon orbital forcing   (overlap 3/5)
+  e5:
+    [0.903] Science Bulletin   Fig. 1     Fig. 1. Leading modes of summer (June-September) precipi
+    [0.899] 海洋地质与第四纪地质         Fig.1      Fig.1    Schematic diagram of the Asian summer monsoon s
+    [0.891] Climate of the Pas Fig. 1     Fig. 1. (a) Sketch of the main atmospheric circulation s
+    [0.881] Geophysical Resear Figure 4   Figure 4.  Correlation between the OIE-based summer (Jun
+    [0.877] Scientific Reports Figure 3   Figure 3.   Comparison of East Asian summer (EASM) and w
+  MiniLM:
+    [0.715] 海洋地质与第四纪地质         Fig.1      Fig.1    Schematic diagram of the Asian summer monsoon s
+    [0.676] Scientific Reports Figure 3   Figure 3.   Comparison of East Asian summer (EASM) and w
+    [0.676] Scientific Reports Figure 1   Figure 1.   East Asian summer (EASM) and winter monsoon 
+    [0.667] Palaeogeography, P Fig. 14    Fig. 14. Illustration showing the mechanisms for the inf
+    [0.661] Science Bulletin   Fig. 1     Fig. 1. Leading modes of summer (June-September) precipi
+
+## Q: dust deposition North Pacific   (overlap 0/5)
+  e5:
+    [0.865] Climate of the Pas Figure 4   Figure 4. Upper panel: subdivision of the globe into dif
+    [0.853] Climate of the Pas Figure 17  Figure 17. Dust deposition ﬂux (g m−2 a−1) from the CESM
+    [0.850] Climate of the Pas Figure 6   Figure 6. Detailed view of the dust records in the north
+    [0.849] Paleoceanography a Figure 17  Figure 17. Comparison of simulated total (wet + dry) dus
+    [0.847] Paleoceanography a Figure 5   Figure 5. Dust in the midHolocene and piControl simulati
+  MiniLM:
+    [0.659] Reviews of Geophys Figure 7   Figure 7. (a) Map of major global dust sources and depos
+    [0.645] Climate of the Pas Figure 16  Figure 16. Comparison of simulated dust deposition (g m−
+    [0.617] Climate of the Pas Figure 3   Figure 3. Conceptual plot of the evolution of dust depos
+    [0.590] Earth-Science Revi Fig. 5     Fig. 5. Holocene dust records from the four dust core re
+    [0.584] Reviews of Geophys Figure 7   Figure 7.  Schematic diagram illustrating dust belt form
+
+## Q: coral sea level 8.2 ka   (overlap 1/5)
+  e5:
+    [0.854] Quaternary Science Fig. 7     Fig. 7. Distribution of d18Ocarb and carbonate content d
+    [0.854] Climate of the Pas Figure 6   Figure 6. Monsoon region at 8 ka and 2.15 ka, derived by
+    [0.853] Gondwana Research  Fig. 1     Fig. 1. Comparison of two oxygen stable isotope profiles
+    [0.851] Radiocarbon        Figure 2   Figure 2 Age-corrected coral Δ14C older than 25 cal kBP 
+    [0.848] Science Bulletin   Fig. 2     Fig. 2. The ZK d18O record compared to other paleoclimat
+  MiniLM:
+    [0.641] The Holocene       Figure 3   Figure 3.  (a) Comparison of JJA mean sea-level pressure
+    [0.631] Philosophical Tran Figure 2   Figure 2. (a–c) Sea level from equations (3.3) and (3.4)
+    [0.618] Journal of Marine  Fig. 1     Fig. 1. Mean sea level pressure for (top) boreal winter 
+    [0.601] Radiocarbon        Figure 2   Figure 2 Age-corrected coral Δ14C older than 25 cal kBP 
+    [0.599] Geoscientific Mode Figure 3   Figure 3. The impact of data-level models on temporal se
+
+## Q: pollen-based biome reconstruction   (overlap 2/5)
+  e5:
+    [0.909] Climate of the Pas Figure 10  Figure 10. Pollen-based biome reconstructions (BIOME6000
+    [0.905] Quaternary Science Fig. 3     Fig. 3. Pollen diagram and biome reconstruction of the c
+    [0.891] Quaternary Science Fig. 1     Fig. 1. Schematic summary comparing the strategies for q
+    [0.890] Ecological Indicat Fig. 8     Fig. 8. Validation of the reconstruction results in ecol
+    [0.889] Climate of the Pas Figure 7   Figure 7. Simulated mid-Holocene biome distribution in t
+  MiniLM:
+    [0.743] Climate of the Pas Figure 10  Figure 10. Pollen-based biome reconstructions (BIOME6000
+    [0.734] Climate Dynamics   Fig. 5     Fig. 5   Pollen data and CONISS-based divisions of polle
+    [0.718] Frontiers in Earth FIGURE 5   FIGURE 5 | Analysis of Changning pollen assemblage.
+    [0.708] Quaternary Science Fig. 5     Fig. 5. The pollen-based reconstruction of plant diversi
+    [0.707] Ecological Indicat Fig. 8     Fig. 8. Validation of the reconstruction results in ecol
+
+## Q: speleothem oxygen isotope annotation   (overlap 3/5)
+  e5:
+    [0.897] Paleoceanography a Figure 5   Figure 5. The screeplot for MC‐PCA applied to our set of
+    [0.878]                    Fig. 3     Fig. 3. Hulu and NGRIP oxygen isotope sequence. The Hulu
+    [0.877] Quaternary Science Fig. 5     Fig. 5. Comparison of pollen-based Pann of GHB core from
+    [0.875] Quaternary Geochro Fig. 2     Fig. 2. Synthetic speleothem growth model. The black lin
+    [0.875] Quaternary Science Fig. 4     Fig. 4. The time series of speleothem d13C obtained from
+  MiniLM:
+    [0.719] Paleoceanography a Figure 5   Figure 5. The screeplot for MC‐PCA applied to our set of
+    [0.582] Quaternary Science Fig. 5     Fig. 5. Comparison of pollen-based Pann of GHB core from
+    [0.566] The Holocene       Figure 10  Figure 10.  Comparison of speleothem δ18O records from K
+    [0.558]                    Fig. 3     Fig. 3. Hulu and NGRIP oxygen isotope sequence. The Hulu
+    [0.550] Journal of Glaciol Fig. 3     Fig. 3. The profiles of (a) sample length in the Bl2003 
+
+## Q: ice core CO2 concentration   (overlap 2/5)
+  e5:
+    [0.908] Climatic Change    Figure 2   Figure 2. Concentrations of atmospheric CO2 in Antarctic
+    [0.905] Nature Communicati Fig. 1     Fig. 1 | Common Era ice core carbon dioxide (CO2) record
+    [0.897] Science of The Tot Fig. 7     Fig. 7. Comparison of ﬁre activity in China with the CO2
+    [0.891] Annals of the New  Figure 4   Figure 4. (A) Orbital parameters over the past 800 ky an
+    [0.888] Quaternary Science Fig. 6     Fig. 6. Comparison of IP25 concentrations (normalised to
+  MiniLM:
+    [0.681] Nature Communicati Fig. 3     Fig. 3 | Artiﬁcially enhanced smoothing of the ice core 
+    [0.651] Nature Communicati Fig. 1     Fig. 1 | Common Era ice core carbon dioxide (CO2) record
+    [0.643] Climatic Change    Figure 2   Figure 2. Concentrations of atmospheric CO2 in Antarctic
+    [0.641] Nature Communicati Fig. 4     Fig. 4 | Results from the deconvolution experiments for 
+    [0.624] Paleoceanography a Figure 2   Figure 2. (a) The 𝛿18O ice core curve from the North Gre
+
+## Q:  wildfire charcoal accumulation   (overlap 1/5)
+  e5:
+    [0.885] Geophysical Resear Figure 2   Figure 2. Summary diagram for Holocene ﬁre‐fuel‐climate 
+    [0.882] The Holocene       Figure 2   Figure 2.  Left column: Interpolated macroscopic charcoa
+    [0.878] Quaternary Science Fig. 2     Fig. 2. Fire regime proxy series through time (Fig. S1, 
+    [0.878] Quaternary Science Fig. 7     Fig. 7. The maximum correlation between sampled charcoal
+    [0.878] Quaternary Science Fig. 6     Fig. 6. The correlation (y-axis) between airborne charco
+  MiniLM:
+    [0.651] The Holocene       Figure 6   Figure 6.  Inferred fire history from Stavsåkra (STV) an
+    [0.637] Journal of Ecology Fig. 3     Fig. 3. Fire–vegetation relationship (a) inferred ﬁre fr
+    [0.633] The Holocene       Figure 2   Figure 2.  Left column: Interpolated macroscopic charcoa
+    [0.633] Quaternary Science Fig. 3     Fig. 3. Comparison of the length:width (L:W) values of c
+    [0.622] Palaeogeography, P Fig. 3     Fig. 3. (a) Charcoal 4. Discussion 5. Implications for c
+
+## Q: foraminifera Mg/Ca paleothermometry   (overlap 1/5)
+  e5:
+    [0.883] Climate of the Pas Fig. 7     Fig. 7. Summary and palaeoceanographic development inter
+    [0.875] Geophysical Resear Figure 2   Figure 2.  Example: Surface seawater carbonate ion conce
+    [0.875] Climate of the Pas Figure 1   Figure 1. Global surface temperature over 150 000 years 
+    [0.875] Quaternary Science Fig. 7     Fig. 7. Planktonic foraminiferal records from (a) the Me
+    [0.874] Quaternary Science Fig. 2     Fig. 2. Holocene d18O climate and inferred paleoproducti
+  MiniLM:
+    [0.662] Climate of the Pas Fig. 4     Fig. 4. Planktic foraminiferal analysis plotted versus c
+    [0.660] Journal of Quatern Figure 4   Figure 4. Planktic foraminiferal fauna and preservation 
+    [0.653] Climate of the Pas Fig. 7     Fig. 7. Summary and palaeoceanographic development inter
+    [0.603] Science Bulletin   Fig. 2     Fig. 2. The ZK d18O record compared to other paleoclimat
+    [0.591] Science            Fig. 2     Fig. 2. (A) Two proxy records related to global ice volu
+
+## Q: loess magnetic susceptibility monsoon   (overlap 3/5)
+  e5:
+    [0.893] Quaternary Science Fig. 11    Fig. 11. Magnetic susceptibility pro"les from the Southw
+    [0.882] Reviews of Geophys Figure 11  Figure 11. Comparison of magnetic susceptibility for Chi
+    [0.876] Geophysical Journa Figure 10  Figure 10. Comparison between low-frequency magnetic sus
+    [0.862] Quaternary Researc Figure 8   Figure 8. Comparison of the frequency-dependent magnetic
+    [0.858] Geophysical Resear Figure 2   Figure 2. Distribution of dolomite (solid blue line) and
+  MiniLM:
+    [0.680] Quaternary Science Fig. 11    Fig. 11. Magnetic susceptibility pro"les from the Southw
+    [0.636] Geophysical Journa Figure 10  Figure 10. Comparison between low-frequency magnetic sus
+    [0.627] Quaternary Interna Fig. 7     Fig. 7. Data used for climatic interpretation (a,low-fre
+    [0.610] Quaternary Researc Figure 8   Figure 8. Comparison of the frequency-dependent magnetic
+    [0.607] Quaternary Interna Fig. 6     Fig. 6. Data used for climatic proxy (a, low-frequency o

@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from engine import FigureExtractor, MiniLMEncoder, FigureDB
+from engine import FigureExtractor, Encoder, FigureDB
 from PIL import Image
 
 WORKERS = 6
@@ -37,7 +37,7 @@ def main():
     items = json.load(open(items_file, encoding="utf-8"))
 
     extractor = FigureExtractor()   # 无共享状态；每任务自开 Document
-    encoder = MiniLMEncoder()       # onnxruntime session.run 线程安全
+    encoder = Encoder()       # onnxruntime session.run 线程安全
     db = FigureDB()                  # 仅主线程使用
 
     n_figs = 0

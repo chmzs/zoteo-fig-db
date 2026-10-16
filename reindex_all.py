@@ -12,7 +12,7 @@ import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureExtractor, MiniLMEncoder, FigureDB, DB_PATH, IMAGE_DIR
+from engine import FigureExtractor, Encoder, FigureDB, DB_PATH, IMAGE_DIR
 from indexer import get_zotero_items_with_pdfs
 
 
@@ -32,7 +32,7 @@ def main():
     papers = {p["item_key"]: p for p in get_zotero_items_with_pdfs(limit=400)}
 
     extractor = FigureExtractor()
-    encoder = MiniLMEncoder()
+    encoder = Encoder()
 
     total = 0
     for key in existing:

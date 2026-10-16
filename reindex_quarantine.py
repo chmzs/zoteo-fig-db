@@ -4,7 +4,7 @@
 import sys, os, json, glob
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureExtractor, MiniLMEncoder, FigureDB
+from engine import FigureExtractor, Encoder, FigureDB
 from indexer import get_zotero_items_with_pdfs
 
 def main():
@@ -32,7 +32,7 @@ def main():
         return
 
     papers = {p["item_key"]: p for p in get_zotero_items_with_pdfs(limit=None)}
-    extractor = FigureExtractor(); encoder = MiniLMEncoder()
+    extractor = FigureExtractor(); encoder = Encoder()
     ok = fail = 0
     for k in targets:
         p = papers.get(k)
