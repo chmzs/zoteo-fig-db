@@ -25,6 +25,12 @@
 5. **启动画廊**：`启动 zoteo-fig-db.bat`（或 `python server.py`）；Windows 保活：
    `schtasks /Create /F /TN "zoteo-fig-db-watchdog" /SC MINUTE /MO 5 /TR "<pythonw副本> watchdog.py"`（非 Windows 可 cron 等效）
 
+## Agent API
+- `GET /api/search?q=&top_k≤500&offset=&journal=&year_min=&year_max=&item_key=&fig_no=` —— 语义+关键词混合检索；`item_key` 省略 `q` 即列表该篇全部图
+- `POST /api/search` `{"q":["批量≤50条"],"top_k":20,...}` —— 批量检索；单字符串 q 返回同 GET 的扁平数组
+- `GET /api/facets` —— 期刊/家族/年份分布；`GET /image/<file>`、`/thumb/<file>` —— 原图/缩略图字节
+- `POST /api/update` `{"item_keys":[...]}` —— 定向增量入库；`GET /api/shutdown` —— 停机（看门狗尊重手动标记）
+
 ## 多设备访问
 服务监听 `0.0.0.0:5173`，宿主机 `GET /api/urls` 列出全部可达地址。其他设备的浏览器与 Agent 直接走 HTTP：`/api/search`（`top_k≤500`，支持 journal/年份筛选）、`/image/<file>`、`/thumb/<file>`、`/api/stats`——机器读图 = 先下载原图再喂视觉模型。连不通时检查 Windows 防火墙放行 TCP 5173 入站（仅专用网络）。
 

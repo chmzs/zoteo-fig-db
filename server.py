@@ -657,6 +657,9 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             journal = query.get("journal", [None])[0]
             year_min = query.get("year_min", [None])[0]
             year_max = query.get("year_max", [None])[0]
+            item_key = query.get("item_key", [None])[0]
+            fig_no = query.get("fig_no", [None])[0]
+            offset = int(query.get("offset", ["0"])[0] or 0)
 
             results = searcher.search(
                 query=q,
@@ -664,11 +667,38 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 journal_filter=journal,
                 year_min=year_min,
                 year_max=year_max,
+                item_key=item_key,
+                fig_no=fig_no,
+                offset=offset,
             )
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(json.dumps(results, ensure_ascii=False).encode("utf-8"))
+            return
+
+        elif path == "/api/facets":
+            if searcher is None:
+                searcher = FigureSearcher()
+            from collections import Counter
+            from family_rules import journal_family
+            metas = searcher._metas
+            jc = Counter((m.get("journal") or "").strip() for m in metas)
+            jc.pop("", None)
+            fams = Counter()
+            for j, n in jc.items():
+                fams[journal_family(j) or "other"] += n
+            years = sorted({m["year"] for m in metas if m.get("year")})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "total_figures": len(metas),
+                "total_papers": len({m["item_key"] for m in metas}),
+                "year_range": [years[0], years[-1]] if years else None,
+                "families": dict(fams.most_common()),
+                "journals": [[j, n] for j, n in jc.most_common(80)],
+            }, ensure_ascii=False).encode("utf-8"))
             return
 
         elif path.startswith("/image/") or path.startswith("/thumb/"):
@@ -707,13 +737,62 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
+        if path == "/api/search":
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            except Exception:
+                body = None
+            if not isinstance(body, dict):
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"json body required"}')
+                return
+            qs = body.get("q", body.get("queries", ""))
+            single = isinstance(qs, str)
+            qlist = [qs] if single else list(qs or [])
+            qlist = [x.strip() for x in qlist if isinstance(x, str) and x.strip()][:50]
+            if not qlist:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"q: string or list(<=50) required"}')
+                return
+            global searcher
+            if searcher is None:
+                searcher = FigureSearcher()
+            top_k = max(1, min(500, int(body.get("top_k", 20))))
+            kw = dict(journal_filter=body.get("journal"), year_min=body.get("year_min"),
+                      year_max=body.get("year_max"), item_key=body.get("item_key"),
+                      fig_no=body.get("fig_no"), offset=int(body.get("offset", 0) or 0))
+            out = [searcher.search(x, top_k=top_k, **kw) for x in qlist]
+            payload = out[0] if single else {"results": out}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            return
+
         if path == "/api/update":
             try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            except Exception:
+                body = {}
+            keys = {str(k).upper() for k in (body.get("item_keys") or []) if k}
+            try:
                 from indexer import get_zotero_items_with_pdfs, index_papers
-                # Scan recent 30 papers
-                papers = get_zotero_items_with_pdfs(limit=30)
+                if keys:
+                    # 定向补录：agent 刚导入的论文立刻建图（<=500/请求）
+                    papers = [pp for pp in get_zotero_items_with_pdfs(limit=None)
+                              if pp["item_key"].upper() in keys][:500]
+                else:
+                    # Scan recent 30 papers
+                    papers = get_zotero_items_with_pdfs(limit=30)
                 before_stats = db.get_stats()
-                index_papers(papers, force_reindex=False)
+                if papers:
+                    index_papers(papers, force_reindex=False)
                 after_stats = db.get_stats()
                 new_figs = after_stats["total_figures"] - before_stats["total_figures"]
                 
