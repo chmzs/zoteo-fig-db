@@ -40,3 +40,10 @@ reindex_full.log
 reindex_full2.log
 scan_si3.log
 remain_targets.json
+si_targets.json
+scan_checkpoint.json
+remain_targets.json
+reindex_full*.log
+scan_si*.log
+chain_final.sh
+chain_finish.sh
