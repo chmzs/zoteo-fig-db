@@ -30,3 +30,12 @@ scan_si2.log
 si_targets.json
 HANDOFF.md
 NIGHT_REPORT.md
+_release_report.log
+_release_probe.json
+release.log
+chain_release.sh
+release_v10.sh
+chain_finish.sh
+reindex_full.log
+reindex_full2.log
+scan_si3.log
