@@ -1,46 +1,73 @@
 # -*- coding: utf-8 -*-
-"""全库毒 PDF 定位：逐页 get_text('blocks') 试探，记录抛异常 或 渲染失败的文献与页码。"""
-import sys, os, json, glob
+"""稳定版全库毒 PDF 探查：单进程顺序探查，彻底免疫 MuPDF 多线程 longjmp 崩溃。
+每 200 篇打印进度，实时存入 poison_scan.json，完成调用 make_poison_report。"""
+import sys, os, glob, json, fitz, time
+
 sys.path.insert(0, r'D:\Zotero\fig_db')
 sys.stdout.reconfigure(encoding='utf-8')
-import fitz
-from concurrent.futures import ThreadPoolExecutor
+from indexer import get_zotero_items_with_pdfs
 
 items = {}
-for f in glob.glob(r'D:\Zotero\fig_db\batch_tmp\*.items.json'):
-    for x in json.load(open(f, encoding='utf-8')):
-        items[x['item_key']] = x
-from indexer import get_zotero_items_with_pdfs
 for p in get_zotero_items_with_pdfs(limit=None):
-    items[p['item_key']] = p   # 全集覆盖批次集
-print('papers:', len(items), flush=True)
+    items[p['item_key']] = p
 
-def probe(kv):
-    k, p = kv
+papers = sorted(items.items())
+print(f"Total papers: {len(papers)}", flush=True)
+
+OUT_FILE = r'D:\Zotero\fig_db\poison_scan.json'
+
+# 加载已有结果（如果存在）
+poison_dict = {}
+if os.path.exists(OUT_FILE):
+    try:
+        for x in json.load(open(OUT_FILE, encoding='utf-8')):
+            poison_dict[x['item_key']] = x
+    except:
+        pass
+
+t0 = time.time()
+for i, (k, p) in enumerate(papers):
+    pdf = p.get('pdf_path', '')
+    if not pdf or not os.path.exists(pdf):
+        poison_dict[k] = {'item_key': k, 'pdf': pdf, 'fail': [('open', 'FileNotFoundError', 'PDF file not found')]}
+        continue
+    try:
+        doc = fitz.open(pdf)
+    except Exception as e:
+        poison_dict[k] = {'item_key': k, 'pdf': pdf, 'fail': [('open', type(e).__name__, str(e)[:80])]}
+        continue
+    
     bad = []
     try:
-        doc = fitz.open(p['pdf_path'])
+        max_pages = min(len(doc), 120)
+        for pi in range(max_pages):
+            try:
+                doc[pi].get_text('blocks')
+            except Exception as e:
+                bad.append((pi + 1, type(e).__name__, str(e)[:80]))
+                break
     except Exception as e:
-        return (k, p.get('pdf_path',''), [('open', type(e).__name__)])
-    for pi in range(len(doc)):
+        bad.append((0, type(e).__name__, str(e)[:80]))
+    finally:
         try:
-            doc[pi].get_text('blocks')
-        except Exception as e:
-            bad.append((pi + 1, type(e).__name__, str(e)[:60]))
-            break  # 一篇记首个毒页即可
-        try:
-            doc[pi].get_drawings()
-        except Exception as e:
-            bad.append((pi + 1, type(e).__name__, str(e)[:60]))
-            break
-    doc.close()
-    return (k, p.get('pdf_path',''), bad)
+            doc.close()
+        except:
+            pass
+            
+    if bad:
+        poison_dict[k] = {'item_key': k, 'pdf': pdf, 'fail': bad}
+        print(f"POISON [{i+1}/{len(papers)}] {k} -> {bad[0]}", flush=True)
+        json.dump(list(poison_dict.values()), open(OUT_FILE, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
 
-out = []
-with ThreadPoolExecutor(max_workers=4) as pool:
-    for k, path, bad in pool.map(probe, sorted(items.items())):
-        if bad:
-            out.append({'item_key': k, 'pdf': path, 'fail': bad})
-            print('POISON', k, bad[:1], flush=True)
-json.dump(out, open('poison_scan.json','w',encoding='utf-8'), ensure_ascii=False, indent=1)
-print('scan done, poison papers:', len(out), flush=True)
+    if (i + 1) % 500 == 0:
+        print(f"  scanned {i+1}/{len(papers)} ({time.time()-t0:.1f}s, total_poison={len(poison_dict)})", flush=True)
+
+json.dump(list(poison_dict.values()), open(OUT_FILE, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+print(f"scan done, poison papers: {len(poison_dict)} in {time.time()-t0:.1f}s", flush=True)
+
+try:
+    import make_poison_report
+    make_poison_report.main()
+    print("poison_report.md updated successfully!", flush=True)
+except Exception as e:
+    print(f"Failed to generate report: {e}", flush=True)
