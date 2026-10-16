@@ -354,7 +354,7 @@ class FigureExtractor:
 
         try:
             doc = fitz.open(pdf_path)
-            max_pages = min(len(doc), 60)
+            max_pages = min(len(doc), 120)
             adapter = get_adapter(journal, doc)
         except Exception as e:
             print(f"Error opening PDF {pdf_path}: {e}")

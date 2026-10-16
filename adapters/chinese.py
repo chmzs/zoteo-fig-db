@@ -34,7 +34,7 @@ class ChineseJournalsAdapter(BaseAdapter):
         blocks = page.get_text("blocks")
         raw_captions = []
         fig_pattern = re.compile(
-            r"^(Figure\s+(\d+[a-zA-Z]?)|Fig\.\s*(\d+[a-zA-Z]?)|图\s*(\d+[a-zA-Z]?)|附图\s*(\d+[a-zA-Z]?))[\.:\s|]",
+            r"^(Figure\s+(S?\d+[a-zA-Z]?)|Fig\.\s*(S?\d+[a-zA-Z]?)|图\s*(S?\d+[a-zA-Z]?)|附图\s*(S?\d+[a-zA-Z]?))[\.:\s|]",
             re.IGNORECASE,
         )
 

@@ -24,7 +24,7 @@ class BaseAdapter:
         blocks = page.get_text("blocks")
         captions = []
         fig_pattern = re.compile(
-            r"^(Figure\s+(\d+[a-zA-Z]?)|Fig\.\s*(\d+[a-zA-Z]?)|图\s*(\d+[a-zA-Z]?)|附图\s*(\d+[a-zA-Z]?))[\.:\s|]",
+            r"^(Figure\s+(S?\d+[a-zA-Z]?)|Fig\.\s*(S?\d+[a-zA-Z]?)|图\s*(S?\d+[a-zA-Z]?)|附图\s*(S?\d+[a-zA-Z]?))[\.:\s|]",
             re.IGNORECASE,
         )
 
@@ -52,8 +52,8 @@ class BaseAdapter:
         # 题注嵌在图例之后）。假阳防线：真题注上方必有图形，locate 的图形证据门会拒绝
         # 上方为正文的段首引用（"Figure 2 shows..."）。
         rescue_pat = re.compile(
-            r"^(Figure|Fig\.?)\s+(\d+[a-zA-Z]?)\s+([A-Z0-9(一-鿿].{24,})$")
-        label_pat = re.compile(r"^(Figure|Fig\.?)\s+(\d+[a-zA-Z]?)[:.]?$", re.IGNORECASE)
+            r"^(Figure|Fig\.?)\s+(S?\d+[a-zA-Z]?)\s+([A-Z0-9(一-鿿].{24,})$")
+        label_pat = re.compile(r"^(Figure|Fig\.?)\s+(S?\d+[a-zA-Z]?)[:.]?$", re.IGNORECASE)
         line_rects = None
         for bi, b in enumerate(blocks):
             if b[6] != 0 or bi in matched_idx:
