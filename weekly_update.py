@@ -38,25 +38,43 @@ def incremental():
     import indexer
     papers = indexer.get_zotero_items_with_pdfs(limit=None)
     conn = sqlite3.connect(DB, timeout=30)
-    have = {r[0] for r in conn.execute("SELECT DISTINCT item_key FROM figures").fetchall()}
+    maxts = dict(conn.execute("SELECT item_key, MAX(indexed_at) FROM figures GROUP BY item_key").fetchall())
     conn.close()
-    fresh = [p for p in papers if p["item_key"] not in have]
-    if not fresh:
-        log("incremental: 无新增条目")
-        return
-    log(f"incremental: 新条目 {len(fresh)} 篇，逐篇提取(单篇异常只记录)…")
+    fresh = [p for p in papers if p["item_key"] not in maxts]
+    # 变更检测: PDF mtime 晚于该篇最后入库 >2min（拼接附件/重下载）→ 清场 redo
+    changed = []
+    for p in papers:
+        ts = maxts.get(p["item_key"])
+        if ts is None or not p.get("pdf_path"):
+            continue
+        try:
+            mt = os.path.getmtime(p["pdf_path"])
+        except OSError:
+            continue
+        if mt - ts > 120:
+            changed.append(p)
+    log(f"incremental: 新增 {len(fresh)} 篇 / 变更 {len(changed)} 篇")
     failed = []
     for p in fresh:
         try:
             indexer.index_papers([p])
         except Exception as e:
             failed.append((p["item_key"], (p.get("title") or "")[:40], type(e).__name__ + ": " + str(e)[:80]))
+    if changed:
+        import engine as _eng
+        dbx = _eng.FigureDB()
+        for p in changed:
+            try:
+                n_old = dbx.remove_item(p["item_key"])
+                indexer.index_papers([p], force_reindex=True)
+                log(f"  redo {p['item_key']} (清 {n_old} 旧行)")
+            except Exception as e:
+                failed.append((p["item_key"], (p.get("title") or "")[:40], "CHANGED " + type(e).__name__ + ": " + str(e)[:60]))
     if failed:
         import json as _j
         _j.dump(failed, open(os.path.join(BASE_DIR, "poison_failures.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        log(f"incremental: {len(failed)} 篇提取异常 -> poison_failures.json（逐篇键名/报错已记录）")
-    log("incremental: 逐篇入库完成（明细见 indexer 输出）")
-
+        log(f"incremental: {len(failed)} 篇异常 -> poison_failures.json（键名/报错已记录）")
+    log("incremental: 完成")
 
 def orphan_gc():
     conn = sqlite3.connect(DB, timeout=30)

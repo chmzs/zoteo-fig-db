@@ -784,15 +784,17 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             try:
                 from indexer import get_zotero_items_with_pdfs, index_papers
                 if keys:
-                    # 定向补录：agent 刚导入的论文立刻建图（<=500/请求）
+                    # 定向补录/重提：新篇建图；已入库(如刚拼接了附件 PDF)清场 redo（<=500/请求）
                     papers = [pp for pp in get_zotero_items_with_pdfs(limit=None)
                               if pp["item_key"].upper() in keys][:500]
+                    for pp in papers:
+                        db.remove_item(pp["item_key"])
                 else:
                     # Scan recent 30 papers
                     papers = get_zotero_items_with_pdfs(limit=30)
                 before_stats = db.get_stats()
                 if papers:
-                    index_papers(papers, force_reindex=False)
+                    index_papers(papers, force_reindex=True)
                 after_stats = db.get_stats()
                 new_figs = after_stats["total_figures"] - before_stats["total_figures"]
                 

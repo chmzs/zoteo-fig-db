@@ -25,7 +25,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(BASE_DIR, "models", "multilingual-e5-small")
 DB_PATH = os.path.join(BASE_DIR, "zotero-figures.sqlite")
 IMAGE_DIR = os.path.join(BASE_DIR, "cache", "figures")
-CURRENT_EXTRACTOR_VERSION = "1.9"   # 全局版本戳（figures.extractor_version 唯一来源）
+CURRENT_EXTRACTOR_VERSION = "2.0"   # 全局版本戳（figures.extractor_version 唯一来源）
 WEBP_QUALITY = 72
 MAX_FULL_SIDE = 1600
 THUMB_MAX_SIDE = 480
@@ -309,6 +309,26 @@ class FigureDB:
         conn.commit()
         conn.close()
         return row_id
+
+    def remove_item(self, item_key):
+        """删除某篇全部图行+FTS+图文件（重提取前的清场，redo 原语）"""
+        import glob
+        conn = self.get_conn()
+        ids = [r[0] for r in conn.execute("SELECT id FROM figures WHERE item_key=?", (item_key,)).fetchall()]
+        for i in ids:
+            try:
+                conn.execute("DELETE FROM fts_figures WHERE rowid=?", (i,))
+            except sqlite3.OperationalError:
+                pass
+        conn.execute("DELETE FROM figures WHERE item_key=?", (item_key,))
+        conn.commit()
+        conn.close()
+        for fp in glob.glob(os.path.join(IMAGE_DIR, f"{item_key}_*")):
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
+        return len(ids)
 
     def exists_item(self, item_key):
         conn = self.get_conn()

@@ -24,7 +24,7 @@ class BaseAdapter:
         blocks = page.get_text("blocks")
         captions = []
         fig_pattern = re.compile(
-            r"^(Figure\s+(S?\d+[a-zA-Z]?)|Fig\.\s*(S?\d+[a-zA-Z]?)|图\s*(S?\d+[a-zA-Z]?)|附图\s*(S?\d+[a-zA-Z]?))[\.:\s|]",
+            r"^(?:(?:Supplementary|Supplemental|Appendix|Extended\s+Data)\s+)?(Figure\s+(S?\d+[a-zA-Z]?)|Fig\.\s*(S?\d+[a-zA-Z]?)|图\s*(S?\d+[a-zA-Z]?)|附图\s*(S?\d+[a-zA-Z]?))[\.:\s|]",
             re.IGNORECASE,
         )
 
