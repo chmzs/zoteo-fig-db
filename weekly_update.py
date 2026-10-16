@@ -101,4 +101,9 @@ if __name__ == "__main__":
     backup()
     incremental()
     orphan_gc()
+    try:
+        import make_poison_report
+        make_poison_report.main()
+    except Exception as e:
+        log(f"poison_report 生成失败: {e}")
     log("weekly_update done")

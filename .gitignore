@@ -56,3 +56,5 @@ poison_failures.json
 supfig_targets.json
 supfig_remedy.json
 supfig_final.json
+poison_report.md
+poison_report.done
