@@ -11,7 +11,6 @@ Zotero GeoFigure Engine (fig_db)
 
 import os
 import re
-import sys
 import time
 import io
 import sqlite3
@@ -292,7 +291,7 @@ class FigureDB:
             record.get("page_no", 1),
             emb_blob,
             int(time.time()),
-            CURRENT_EXTRACTOR_VERSION,
+            CURRENT_EXTRACTOR_VERSION  # v2.0: 全局版本戳单点（勿硬编码）,
         ))
         row_id = cursor.lastrowid
         cursor.execute("""
