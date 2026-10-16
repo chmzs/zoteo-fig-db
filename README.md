@@ -14,14 +14,14 @@
 - **人工画廊**（`http://127.0.0.1:5173`，局域网可达）：无限滚动+content-visibility、灯箱原图、**一键跳 Zotero 打开 PDF 并定位页码**、复制 Obsidian 双链/图片嵌入/DSH 审图提示词
 - **Agent 集成**：`/api/search` 返回图路径+题注+双链，配合 `read_image` 直接进多模态视觉循环
 - **服务化**：任务管理器进程名 `zoteo-fig-db`；开始菜单一键启停；计划任务看门狗每 5 分钟自愈；网页可优雅关停（尊重手动停止标记）
-- **夜间全库批处理**：`batch_master.py` 按出版商家族分组、断点续跑、超时二分、逐批 QC、隔离清单
+- **三层工具链**：首次/大版本全库重刷用 `batch_master.py`（家族分组+断点+超时二分+隔离清单）；日常增量与卫生用计划任务 `weekly_update.py`（备份轮转→新论文入库→孤儿GC）；单篇立刻建图用 `POST /api/update {"item_keys":[...]}`
 
 ## 快速开始（建你自己的图库）
 
 1. **环境**：Python ≥3.10 + `pymupdf` `pillow` `numpy` `onnxruntime`（本项目用 [pixi](https://pixi.sh) geo 环境）
 2. **模型**：下载 [multilingual-e5-small](https://huggingface.co/onnx-community/multilingual-e5-small) 的 `onnx/model_quantized.onnx`（改名 model_int8.onnx，~118MB）与 `tokenizer.json`，放到 `models/multilingual-e5-small/`
 3. **配置**：`indexer.py` 顶部 `ZOTERO_DIR` / `STORAGE_DIR` 指向你的 Zotero 数据目录（只读访问 `zotero.sqlite`，不写）
-4. **首次建库**：`python indexer.py --limit 20`，全库则 `python batch_master.py`
+4. **首次建库**：`python indexer.py --limit 20` 试跑，全库用 `python batch_master.py`（断点可续）；此后交给每周计划任务即可
 5. **启动画廊**：`启动 zoteo-fig-db.bat`（或 `python server.py`）；Windows 保活：
    `schtasks /Create /F /TN "zoteo-fig-db-watchdog" /SC MINUTE /MO 5 /TR "<pythonw副本> watchdog.py"`（非 Windows 可 cron 等效）
 
@@ -44,7 +44,8 @@ zoteo-fig-db/
 ├── notes_index.py     # item_key→Obsidian 笔记双链映射；期刊简称合法性校验
 ├── indexer.py         # Zotero 扫描 + 主 PDF 优选 + 增量入库
 ├── server.py          # 零依赖画廊 + REST API（端口 5173）
-├── batch_master.py    # 全库分批编排（家族分组/QC/断点/二分重试）
+├── batch_master.py    # 全库分批编排（家族分组/QC/断点/二分重试）— 首次建库/大版本重刷用
+├── weekly_update.py   # 每周自动维护：库快照轮转 → 增量入库 → 孤儿图清理
 ├── batch_worker.py    # 单批执行器（逐篇 jsonl 进度 + quarantine）
 ├── reindex_all.py     # 算法升级后全量重抽
 ├── watchdog.py        # 看门狗（端口体检 + detached 拉起，尊重 .manual_stop）
