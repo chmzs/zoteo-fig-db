@@ -43,3 +43,6 @@ NO_BROWSER=1 $PY server.py                 # 画廊（默认 5173，0.0.0.0 局�
 ## 当前任务交接
 
 夜跑状态看 `batch.log` 尾部 + `FINAL_DONE.json`（存在即完成）；隔离清单 `batch_state.json.quarantined`。完成后流程：重启 zoteo-fig-db 服务 → 抽样 read_image 目检 → 出中文总结报告。
+
+## 访问拓扑（单人主机 + 多设备 API）
+图库仅在宿主机（overlay `100.64.0.10` / WLAN `192.168.0.102`，`GET /api/urls` 自答）。其他设备的 Agent 一律 HTTP：`/api/search`（top_k≤500）、`/image/<file>`、`/thumb/<file>`、`/api/stats`、`POST /api/update`；远程审图=下载 image 后本地 read_image。连不通先查 Windows 防火墙 TCP 5173 入站（专用配置文件）。
