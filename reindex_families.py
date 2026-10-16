@@ -27,8 +27,11 @@ FAMILIES = tuple(sys.argv[1].split(",")) if len(sys.argv) > 1 else ("elsevier", 
 
 def main():
     papers = get_zotero_items_with_pdfs(limit=None)
-    targets = [p for p in papers
-               if p.get("journal") and get_adapter(p["journal"], None).name in FAMILIES]
+    if FAMILIES and FAMILIES[0] == "all":
+        targets = [p for p in papers if p.get("pdf_path")]
+    else:
+        targets = [p for p in papers
+                   if p.get("journal") and get_adapter(p["journal"], None).name in FAMILIES]
     print(f"targets: {len(targets)}", flush=True)
 
     db = FigureDB()
