@@ -275,13 +275,18 @@ HTML_CONTENT = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: auto;
+            overflow: hidden;
+            position: relative;
+            user-select: none;
+            touch-action: none;
         }
         .modal-img-container img {
             max-width: 100%;
             max-height: 72vh;
             object-fit: contain;
             cursor: zoom-in;
+            transform-origin: center center;
+            will-change: transform;
         }
         .modal-close {
             position: absolute;
@@ -512,6 +517,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         function openModal(idx) {
             const item = currentResults[idx];
             if (!item) return;
+            resetZoom();
             const fname = item.image_path.split(/[\\\\/]/).pop();
             document.getElementById('modalImg').src = `/image/${encodeURIComponent(fname)}`;
             document.getElementById('modalFigNo').innerText = `${item.fig_no} (PDF 第 ${item.page_no} 页)`;
@@ -522,7 +528,107 @@ HTML_CONTENT = """<!DOCTYPE html>
 
         function closeModal() {
             document.getElementById('imageModal').classList.remove('active');
+            resetZoom();
         }
+
+        let zoomScale = 1;
+        let panX = 0, panY = 0;
+        let isPanning = false;
+        let startX = 0, startY = 0;
+        let hasMoved = false;
+
+        function updateTransform(smooth = false) {
+            const img = document.getElementById('modalImg');
+            if (!img) return;
+            img.style.transition = smooth ? 'transform 0.16s cubic-bezier(0.2, 0, 0.2, 1)' : 'none';
+            if (zoomScale <= 1.01) {
+                zoomScale = 1;
+                panX = 0;
+                panY = 0;
+                img.style.transform = 'none';
+                img.style.cursor = 'zoom-in';
+            } else {
+                img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
+                img.style.cursor = isPanning ? 'grabbing' : 'grab';
+            }
+        }
+
+        function resetZoom() {
+            zoomScale = 1;
+            panX = 0;
+            panY = 0;
+            isPanning = false;
+            hasMoved = false;
+            updateTransform(false);
+        }
+
+        (function setupZoom() {
+            const container = document.querySelector('.modal-img-container');
+            const img = document.getElementById('modalImg');
+            if (!container || !img) return;
+
+            img.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                hasMoved = false;
+                if (zoomScale > 1) {
+                    isPanning = true;
+                    startX = e.clientX - panX;
+                    startY = e.clientY - panY;
+                    img.style.cursor = 'grabbing';
+                    e.preventDefault();
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isPanning) return;
+                hasMoved = true;
+                panX = e.clientX - startX;
+                panY = e.clientY - startY;
+                updateTransform(false);
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isPanning) {
+                    isPanning = false;
+                    updateTransform(false);
+                }
+            });
+
+            img.addEventListener('click', (e) => {
+                if (hasMoved) return; // 用户在拖拽平移，不触发缩放切换
+                if (zoomScale <= 1.01) {
+                    const rect = img.getBoundingClientRect();
+                    const offsetX = e.clientX - (rect.left + rect.width / 2);
+                    const offsetY = e.clientY - (rect.top + rect.height / 2);
+                    zoomScale = 2.4;
+                    panX = -offsetX * (zoomScale - 1);
+                    panY = -offsetY * (zoomScale - 1);
+                    updateTransform(true);
+                } else {
+                    resetZoom();
+                }
+            });
+
+            container.addEventListener('wheel', (e) => {
+                const modal = document.getElementById('imageModal');
+                if (!modal || !modal.classList.contains('active')) return;
+                e.preventDefault();
+                const factor = e.deltaY < 0 ? 1.25 : 0.8;
+                const newScale = Math.max(1, Math.min(8, zoomScale * factor));
+                if (newScale <= 1.01) {
+                    resetZoom();
+                    return;
+                }
+                const rect = img.getBoundingClientRect();
+                const mouseX = e.clientX - (rect.left + rect.width / 2);
+                const mouseY = e.clientY - (rect.top + rect.height / 2);
+                const scaleRatio = newScale / zoomScale;
+                panX = mouseX - (mouseX - panX) * scaleRatio;
+                panY = mouseY - (mouseY - panY) * scaleRatio;
+                zoomScale = newScale;
+                updateTransform(false);
+            }, { passive: false });
+        })();
 
         function showToast(msg, isError) {
             const t = document.getElementById('toast');
