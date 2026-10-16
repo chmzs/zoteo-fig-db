@@ -49,3 +49,7 @@ chain_final.sh
 chain_finish.sh
 *.bak
 *.bak.*
+poison_scan.json
+poison_scan.log
+weekly_run1.log
+poison_failures.json

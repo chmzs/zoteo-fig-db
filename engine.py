@@ -364,12 +364,18 @@ class FigureExtractor:
 
         for page_idx in range(max_pages):
             page = doc[page_idx]
-            captions_on_page = adapter.find_captions(page, page_idx)
+            # 毒页容错: MuPDF 图形栈超限(嵌套 Form XObject)整页不可遍历 -> 跳页不跳篇
+            try:
+                captions_on_page = adapter.find_captions(page, page_idx)
+                if captions_on_page:
+                    infos = page.get_image_info(xrefs=True)
+            except RuntimeError as e:
+                if "graphics states" in str(e):
+                    print(f"  [poison-page] p{page_idx + 1} 跳过(MuPDF图形栈超限): {os.path.basename(pdf_path)[:40]}")
+                    continue
+                raise
             if not captions_on_page:
                 continue
-
-            # 1. Collect raster image METADATA only (no full decode; decode only the matched one later)
-            infos = page.get_image_info(xrefs=True)
             valid_images = []
             seen_xref = set()
             for info in infos:
@@ -627,10 +633,11 @@ class FigureSearcher:
         except Exception:
             return []
 
-    def search(self, query, top_k=20, journal_filter=None, year_min=None, year_max=None):
-        query = query.strip()
-        if not query:
-            return []
+    def search(self, query, top_k=20, journal_filter=None, year_min=None, year_max=None,
+               item_key=None, fig_no=None, offset=0):
+        query = (query or "").strip()
+        if not query and not (item_key or journal_filter or fig_no or year_min or year_max):
+            return []  # 无词且无过滤 = 空操作(防全库 dump)
 
         self._ensure_cache()
         if self._M is None or len(self._metas) == 0:
@@ -638,23 +645,27 @@ class FigureSearcher:
 
         from notes_index import clean_wikilink_alias, make_wikilink
 
-        q_emb = self.encoder.encode_query(query)
-        sims = self._M @ q_emb
-
         n = len(self._metas)
-        pool = int(max(200, top_k * 10))
-        if n <= pool:
-            cand_idx = list(range(n))
+        if query:
+            q_emb = self.encoder.encode_query(query)
+            sims = self._M @ q_emb
+            pool = int(max(200, (top_k + offset) * 10))
+            if n <= pool:
+                cand_idx = list(range(n))
+            else:
+                cand_idx = np.argpartition(-sims, pool)[:pool].tolist()
+            fts_ids = self._fts_candidates(query)
+            if fts_ids:
+                cand_idx.extend(self._id2idx[i] for i in fts_ids if i in self._id2idx)
         else:
-            cand_idx = np.argpartition(-sims, pool)[:pool].tolist()
-
-        fts_ids = self._fts_candidates(query)
-        if fts_ids:
-            cand_idx.extend(self._id2idx[i] for i in fts_ids if i in self._id2idx)
+            sims = None  # 纯过滤列表模式：按入库序输出,不算分
+            cand_idx = list(range(n))
 
         jf = journal_filter.lower() if journal_filter else None
         ymin = int(year_min) if year_min else None
         ymax = int(year_max) if year_max else None
+        ik = item_key.strip().upper() if item_key else None
+        fg = fig_no.strip().lower() if fig_no else None
 
         q_lower = query.lower()
         scored = []
@@ -670,14 +681,18 @@ class FigureSearcher:
                 continue
             if ymax is not None and (m["year"] or 9999) > ymax:
                 continue
+            if ik and (m["item_key"] or "").upper() != ik:
+                continue
+            if fg and fg not in m["_fig_l"]:
+                continue
 
-            sim = float(sims[i])
+            sim = float(sims[i]) if sims is not None else 0.0
             bonus = 0.0
-            if q_lower in m["_cap_l"]:
+            if query and q_lower in m["_cap_l"]:
                 bonus += 0.15
-            if q_lower in m["_title_l"]:
+            if query and q_lower in m["_title_l"]:
                 bonus += 0.10
-            if q_lower in m["_fig_l"]:
+            if query and q_lower in m["_fig_l"]:
                 bonus += 0.20
             scored.append((sim + bonus, sim, i))
 
@@ -713,7 +728,7 @@ class FigureSearcher:
                 "score": round(final_score, 4),
                 "semantic_sim": round(sim, 4),
             })
-            if len(results) >= top_k:
+            if len(results) >= top_k + max(0, offset):
                 break
 
-        return results
+        return results[int(offset):] if offset else results

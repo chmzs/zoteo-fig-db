@@ -45,15 +45,17 @@ def incremental():
         log("incremental: 无新增条目")
         return
     log(f"incremental: 新条目 {len(fresh)} 篇，逐篇提取(单篇异常只记录)…")
-    failed = 0
+    failed = []
     for p in fresh:
         try:
             indexer.index_papers([p])
-        except Exception:
-            failed += 1
+        except Exception as e:
+            failed.append((p["item_key"], (p.get("title") or "")[:40], type(e).__name__ + ": " + str(e)[:80]))
     if failed:
-        log(f"incremental: {failed} 篇提取异常（毒 PDF/嵌套图形栈，跳过）")
-    log(f"incremental: 入库 {n} 图")
+        import json as _j
+        _j.dump(failed, open(os.path.join(BASE_DIR, "poison_failures.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        log(f"incremental: {len(failed)} 篇提取异常 -> poison_failures.json（逐篇键名/报错已记录）")
+    log("incremental: 逐篇入库完成（明细见 indexer 输出）")
 
 
 def orphan_gc():
