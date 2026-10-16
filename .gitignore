@@ -47,3 +47,5 @@ reindex_full*.log
 scan_si*.log
 chain_final.sh
 chain_finish.sh
+*.bak
+*.bak.*
