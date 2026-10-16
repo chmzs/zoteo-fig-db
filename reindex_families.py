@@ -28,7 +28,8 @@ def main():
     papers = get_zotero_items_with_pdfs(limit=None)
     if FAMILIES and FAMILIES[0].endswith(".json"):
         import json as _j
-        keys = set(_j.load(open(FAMILIES[0], encoding="utf-8")))
+        _d = _j.load(open(FAMILIES[0], encoding="utf-8"))
+        keys = set(_d["keys"]) if isinstance(_d, dict) else set(_d)
         targets = [p for p in papers if p["item_key"] in keys]
     elif FAMILIES and FAMILIES[0] == "all":
         targets = [p for p in papers if p.get("pdf_path")]

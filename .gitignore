@@ -39,3 +39,4 @@ chain_finish.sh
 reindex_full.log
 reindex_full2.log
 scan_si3.log
+remain_targets.json
