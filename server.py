@@ -374,8 +374,10 @@ HTML_CONTENT = """<!DOCTYPE html>
 
     <script>
         let currentResults = [];
+        let lastQuery = '';
         const BATCH = 24;
         let loadedCount = 0;
+        let fetchTopK = 100;   // 随滚动逐轮加深: 100 -> 500
         let io = null;
 
         async function loadStats() {
@@ -390,11 +392,13 @@ HTML_CONTENT = """<!DOCTYPE html>
             const q = document.getElementById('searchInput').value.trim();
             if (!q) return;
 
+            lastQuery = q;
             const gallery = document.getElementById('gallery');
-            gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 40px;">正在通过 MiniLM 语义检索...</div>';
+            gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 40px;">正在通过 e5 多语言语义检索...</div>';
 
+            fetchTopK = 100;
             try {
-                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&top_k=100`);
+                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&top_k=${fetchTopK}`);
                 const data = await res.json();
                 currentResults = data;
                 renderGallery(data);
@@ -470,9 +474,17 @@ HTML_CONTENT = """<!DOCTYPE html>
             `;
         }
 
-        function appendBatch() {
+        async function appendBatch() {
             const gallery = document.getElementById('gallery');
-            const next = currentResults.slice(loadedCount, loadedCount + BATCH);
+            let next = currentResults.slice(loadedCount, loadedCount + BATCH);
+            if (!next.length && currentResults.length >= fetchTopK && fetchTopK < 500) {
+                fetchTopK += 100;
+                try {
+                    const rr = await fetch(`/api/search?q=${encodeURIComponent(lastQuery)}&top_k=${fetchTopK}`);
+                    currentResults = await rr.json();
+                } catch(e) {}
+                next = currentResults.slice(loadedCount, loadedCount + BATCH);
+            }
             if (!next.length) { updateMoreBtn(); return; }
             const html = next.map((item, rel) => cardHtml(item, loadedCount + rel)).join('');
             gallery.insertAdjacentHTML('beforeend', html);
@@ -483,7 +495,8 @@ HTML_CONTENT = """<!DOCTYPE html>
         function updateMoreBtn() {
             const wrap = document.getElementById('morewrap');
             const counter = document.getElementById('countnote');
-            if (wrap) wrap.style.display = (loadedCount < currentResults.length) ? 'block' : 'none';
+            const canMore = loadedCount < currentResults.length || (currentResults.length >= fetchTopK && fetchTopK < 500);
+            if (wrap) wrap.style.display = canMore ? 'block' : 'none';
             if (counter) counter.textContent = currentResults.length ? `已加载 ${loadedCount} / ${currentResults.length} 张匹配图表` : '';
         }
 
@@ -492,7 +505,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             const sentinel = document.getElementById('sentinel');
             if (!sentinel || !('IntersectionObserver' in window)) return;
             io = new IntersectionObserver((entries) => {
-                if (entries[0].isIntersecting && loadedCount < currentResults.length) appendBatch();
+                if (entries[0].isIntersecting) appendBatch();
             }, { rootMargin: '800px 0px' });
             io.observe(sentinel);
         })();
@@ -634,7 +647,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 searcher = FigureSearcher()
 
             q = query.get("q", [""])[0]
-            top_k = int(query.get("top_k", [20])[0])
+            top_k = max(1, min(500, int(query.get("top_k", [20])[0])))
             journal = query.get("journal", [None])[0]
             year_min = query.get("year_min", [None])[0]
             year_max = query.get("year_max", [None])[0]

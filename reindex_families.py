@@ -22,7 +22,7 @@ from engine import FigureExtractor, Encoder, FigureDB, IMAGE_DIR
 from indexer import get_zotero_items_with_pdfs
 from adapters import get_adapter
 
-FAMILIES = ("elsevier", "agu_wiley")
+FAMILIES = tuple(sys.argv[1].split(",")) if len(sys.argv) > 1 else ("elsevier", "agu_wiley")
 
 
 def main():

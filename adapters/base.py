@@ -152,7 +152,8 @@ class BaseAdapter:
             band_imgs = [vi for vi in valid_images
                          if vi["rect"] and vi["rect"].intersects(band) and vi["rect"].y1 <= cap_rect.y0 + 15]
             band_dr = [d["rect"] for d in page_drawings
-                       if d["rect"].y1 <= cap_rect.y0 + 12 and d["rect"].y0 >= 40 and d["rect"].intersects(band)]
+                       if d["rect"].y1 <= cap_rect.y0 + 12 and d["rect"].y0 >= 40 and d["rect"].intersects(band)
+                       and d["rect"].y1 > 64]  # 页眉带(logo/下划线/装饰)无条件排除
 
             # 单幅位图且无矢量叠加 → 直接抽原始字节（最常见，最高保真）
             if len(band_imgs) == 1 and not band_dr:
@@ -166,12 +167,12 @@ class BaseAdapter:
             u = self._merge_spans(page, u, text_spans, 40.0, cap_rect.y0 - 2, 14.0, 10.0)
             clip = fitz.Rect(
                 max(25, u.x0 - 6),
-                max(40, u.y0 - 6),
+                max(64, u.y0 - 6),   # 页眉硬地板：期刊页眉带 <62pt，簇顶一律不得升入页眉区
                 min(page_rect.width - 25, u.x1 + 6),
                 min(cap_rect.y0 - 2, u.y1 + 6),
             )
             if clip.height < 60 or clip.width < 80:
-                return band, None
+                return fitz.Rect(band.x0, max(64, band.y0), band.x1, band.y1), None
             return clip, None
 
         # ---- 回退路径：题注在图上方（Wiley Accepted Article 等手稿式排版）----
@@ -209,8 +210,12 @@ class BaseAdapter:
             spans = spans()
         if spans:
             exp = fitz.Rect(u.x0 - 20, u.y0 - pad_above, u.x1 + 20, u.y1 + pad_below)
+            u_start_y = u.y0
             for sr in spans:
                 if sr.y0 >= y_top and sr.y1 <= y_bottom and sr.intersects(exp):
+                    # header_guard: 图簇未触及页眉区(u.y0>64)时，页眉文本行(y1≤64)不得并入
+                    if sr.y1 <= 64 and u_start_y > 64:
+                        continue
                     u = u | sr
         return u
 

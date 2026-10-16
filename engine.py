@@ -25,7 +25,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(BASE_DIR, "models", "multilingual-e5-small")
 DB_PATH = os.path.join(BASE_DIR, "zotero-figures.sqlite")
 IMAGE_DIR = os.path.join(BASE_DIR, "cache", "figures")
-CURRENT_EXTRACTOR_VERSION = "1.7"
+CURRENT_EXTRACTOR_VERSION = "1.8"
 WEBP_QUALITY = 72
 MAX_FULL_SIDE = 1600
 THUMB_MAX_SIDE = 480
@@ -619,7 +619,7 @@ class FigureSearcher:
             conn = self.db.get_conn()
             cur = conn.cursor()
             cur.execute(
-                "SELECT rowid FROM fts_figures WHERE fts_figures MATCH ? LIMIT 200", (match,)
+                "SELECT rowid FROM fts_figures WHERE fts_figures MATCH ? LIMIT 600", (match,)
             )
             ids = [row[0] for row in cur.fetchall()]
             conn.close()
