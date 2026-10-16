@@ -42,6 +42,7 @@ zoteo-fig-db/
 ├── batch_worker.py    # 单批执行器（逐篇 jsonl 进度 + quarantine）
 ├── reindex_all.py     # 算法升级后全量重抽
 ├── watchdog.py        # 看门狗（端口体检 + detached 拉起，尊重 .manual_stop）
+├── weekly_update.py   # 每周自动维护：库快照轮转 → 新论文增量入库 → 孤儿图清理
 ├── models/            # [不入库] e5-small INT8 ONNX 权重
 ├── cache/             # [不入库] webp 图 + 向量矩阵磁盘缓存 + 笔记映射缓存
 └── batch_tmp/         # [不入库] 批次中间产物
