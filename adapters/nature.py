@@ -35,7 +35,7 @@ class NatureAdapter(BaseAdapter):
         blocks = page.get_text("blocks")
         captions = []
         # Nature strictly uses 'Fig. X | ' or 'Figure X | '
-        nature_pattern = re.compile(r"^(Fig\.\s*(\d+[a-zA-Z]?)|Figure\s+(\d+[a-zA-Z]?))\s*\|", re.IGNORECASE)
+        nature_pattern = re.compile(r"^((?:(?:Supplementary|Supplemental|Appendix|Extended\s+Data)\s+)?(?:Fig\.\s*(\d+[a-zA-Z]?)|Figure\s+(\d+[a-zA-Z]?)))\s*\|", re.IGNORECASE)
 
         for b in blocks:
             if b[6] == 0:

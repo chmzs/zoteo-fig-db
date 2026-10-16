@@ -24,7 +24,7 @@ class BaseAdapter:
         blocks = page.get_text("blocks")
         captions = []
         fig_pattern = re.compile(
-            r"^(?:(?:Supplementary|Supplemental|Appendix|Extended\s+Data)\s+)?(Figure\s+(S?\d+[a-zA-Z]?)|Fig\.\s*(S?\d+[a-zA-Z]?)|图\s*(S?\d+[a-zA-Z]?)|附图\s*(S?\d+[a-zA-Z]?))[\.:\s|]",
+            r"^((?:(?:Supplementary|Supplemental|Appendix|Extended\s+Data)\s+)?(?:Figure\s+(S?\d+[a-zA-Z]?)|Fig\.\s*(S?\d+[a-zA-Z]?)|图\s*(S?\d+[a-zA-Z]?)|附图\s*(S?\d+[a-zA-Z]?))[\.:\s|])",
             re.IGNORECASE,
         )
 
@@ -37,7 +37,7 @@ class BaseAdapter:
                 m = fig_pattern.search(txt)
                 if m:
                     matched_idx.add(bi)
-                    matched_str = m.group(1).strip()
+                    matched_str = re.sub(r"\s+", " ", m.group(0)).strip().rstrip(".:|").strip()
                     num_m = re.search(r"\d+[a-zA-Z]?", matched_str)
                     fig_num = num_m.group(0).lower() if num_m else matched_str
                     caption_text = txt.replace("\n", " ").strip()
