@@ -214,7 +214,7 @@ class FigureDB:
         self._init_db()
 
     def get_conn(self):
-        return sqlite3.connect(self.db_path)
+        return sqlite3.connect(self.db_path, timeout=30)
 
     def _init_db(self):
         conn = self.get_conn()
