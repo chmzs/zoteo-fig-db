@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 """夜跑收尾：隔离条目救回 -> 生成总结报告 -> 重启 zoteo-fig-db 画廊 -> curl 验证。"""
 
-import sys
 import os
 import subprocess
+import sys
 import time
 
 BASE = os.path.dirname(os.path.abspath(__file__))

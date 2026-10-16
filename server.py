@@ -1,20 +1,19 @@
-# -*- coding: utf-8 -*-
 """
 zoteo-fig-db server (gallery + API)
 Zero-dependency HTTP server based on Python's built-in http.server.
 Fully compatible with Python 3.10 - 3.15+.
 """
 
+import json
 import os
 import sys
 import time
-import json
 import urllib.parse
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureSearcher, FigureDB, DB_PATH, IMAGE_DIR
+from engine import IMAGE_DIR, FigureDB, FigureSearcher
 
 PORT = int(os.environ.get("GEO_FIGURE_PORT", 5173))
 searcher = None

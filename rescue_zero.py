@@ -1,10 +1,14 @@
-# -*- coding: utf-8 -*-
 """主批完成后：收集所有 figs==0 的论文，用当前最新代码重跑，救回可提取的图。"""
-import sys, os, json, glob
+import glob
+import json
+import os
+import sys
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureExtractor, Encoder, FigureDB, CURRENT_EXTRACTOR_VERSION
+from engine import Encoder, FigureDB, FigureExtractor
 from indexer import get_zotero_items_with_pdfs
+
 
 def main():
     zero_keys = set()

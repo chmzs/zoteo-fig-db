@@ -1,16 +1,16 @@
-# -*- coding: utf-8 -*-
 """生成夜跑中文总结报告（FINAL_DONE 后执行）：各家族统计 / 隔离聚类 / DB 总览 / 修复记录。"""
 
-import sys
-import os
-import json
 import glob
+import json
+import os
 import sqlite3
+import sys
 from collections import Counter, defaultdict
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 from batch_master import classify
+
 
 def main():
     st = {}

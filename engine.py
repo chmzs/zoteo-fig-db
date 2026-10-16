@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Zotero GeoFigure Engine (fig_db)
 - Robust multi-publisher Figure & Caption Alignment
@@ -9,15 +8,17 @@ Zotero GeoFigure Engine (fig_db)
 - e5-small INT8 Embedding & SQLite FTS5 Hybrid Search
 """
 
+import io
 import os
 import re
-import time
-import io
 import sqlite3
-import numpy as np
+import time
+
 import fitz  # PyMuPDF
-from PIL import Image
+import numpy as np
 import onnxruntime as ort
+from PIL import Image
+
 from adapters import get_adapter
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -635,7 +636,7 @@ class FigureSearcher:
         if self._M is None or len(self._metas) == 0:
             return []
 
-        from notes_index import make_wikilink, clean_wikilink_alias
+        from notes_index import clean_wikilink_alias, make_wikilink
 
         q_emb = self.encoder.encode_query(query)
         sims = self._M @ q_emb

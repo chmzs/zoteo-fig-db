@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 AGU / Wiley Publishing Adapter
 Dedicated for AGU journals: Geophysical Research Letters (GRL), Journal of Geophysical Research (JGR),
@@ -6,8 +5,10 @@ Water Resources Research (WRR), Earth's Future, Paleoceanography and Paleoclimat
 """
 
 import fitz
-from .base import BaseAdapter
+
 from family_rules import journal_family
+
+from .base import BaseAdapter
 
 
 class AGUAdapter(BaseAdapter):

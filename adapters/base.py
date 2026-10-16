@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
 """
 Base Publisher Adapter for Zotero GeoFigure Engine
 Defines the interface for publisher-specific PDF layout adapters.
 """
 
 import re
+
 import fitz
 
 

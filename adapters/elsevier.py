@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Elsevier Publishing Adapter
 Dedicated for Elsevier earth science journals: Quaternary Science Reviews, Palaeo3,
@@ -6,8 +5,10 @@ Earth-Science Reviews, Journal of Hydrology, CATENA, Quaternary International, G
 """
 
 import fitz
-from .base import BaseAdapter
+
 from family_rules import journal_family
+
+from .base import BaseAdapter
 
 
 class ElsevierAdapter(BaseAdapter):

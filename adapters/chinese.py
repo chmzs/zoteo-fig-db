@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Chinese Geoscience Journals Adapter
 Dedicated for Chinese journals: 地理学报, 第四纪研究, 中国科学:地球科学, 科学通报, etc.
@@ -6,7 +5,9 @@ Handles bilingual caption pairing (图 1 + Fig. 1) and CJK punctuation.
 """
 
 import re
+
 import fitz
+
 from .base import BaseAdapter
 
 

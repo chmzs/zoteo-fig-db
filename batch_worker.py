@@ -1,20 +1,20 @@
-# -*- coding: utf-8 -*-
 """Batch worker: 并行提取一组文献的图并入库（3 线程；sqlite 写入固定在本进程主线程串行执行）。
 用法: python batch_worker.py <items.json> <out_prefix>
 每篇一行 JSON 写 <out>.papers.jsonl；异常写 <out>.quarantine.jsonl；批次 QC 写 <out>.qc.json
 """
 
-import sys
-import os
 import json
+import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from engine import FigureExtractor, Encoder, FigureDB, CURRENT_EXTRACTOR_VERSION
 from PIL import Image
+
+from engine import Encoder, FigureDB, FigureExtractor
 
 WORKERS = 6
 

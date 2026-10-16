@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """出版商家族规则单一事实源：batch_master(调度/QC) 与 adapters(提取路由) 共用。"""
 
 # 刊名兜底规则（publisher 字段大面积为空时用；元组顺序即优先级）

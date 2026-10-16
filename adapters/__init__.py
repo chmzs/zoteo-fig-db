@@ -1,15 +1,14 @@
-# -*- coding: utf-8 -*-
 """
 Publisher Adapters Registry for Zotero GeoFigure Engine
 """
 
+from .agu import AGUAdapter
 from .base import BaseAdapter
 from .chinese import ChineseJournalsAdapter
-from .nature import NatureAdapter
 from .elsevier import ElsevierAdapter
-from .agu import AGUAdapter
-from .plos import PLOSAdapter
 from .generic import GenericAdapter
+from .nature import NatureAdapter
+from .plos import PLOSAdapter
 
 # Order matters: specific adapters first, GenericAdapter as fallback
 ADAPTER_REGISTRY = [

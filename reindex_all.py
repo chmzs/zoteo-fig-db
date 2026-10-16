@@ -1,18 +1,17 @@
-# -*- coding: utf-8 -*-
 """
 Reindex all existing items with current extractor logic.
 - 清理假图注残留行（题注被并入正文的假卡）
 - 重抽全部图并补 journal_abbr / authors 新列
 """
 
-import os
-import sys
 import glob
+import os
 import sqlite3
+import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureExtractor, Encoder, FigureDB, DB_PATH, IMAGE_DIR, CURRENT_EXTRACTOR_VERSION
+from engine import IMAGE_DIR, Encoder, FigureDB, FigureExtractor
 from indexer import get_zotero_items_with_pdfs
 
 

@@ -1,11 +1,15 @@
-# -*- coding: utf-8 -*-
 """主批跑完后执行：读取 batch_state.json + batch_tmp/*.quarantine.jsonl 的隔离条目，
 用当前最新代码重跑（修复 get_drawings 降级后可救回大部分 MuPDF 异常文献）。"""
-import sys, os, json, glob
+import glob
+import json
+import os
+import sys
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureExtractor, Encoder, FigureDB, CURRENT_EXTRACTOR_VERSION
+from engine import Encoder, FigureDB, FigureExtractor
 from indexer import get_zotero_items_with_pdfs
+
 
 def main():
     keys = set()

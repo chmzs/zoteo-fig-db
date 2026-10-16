@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Nature Publishing Group Adapter
 Dedicated for Nature, Nature Communications, Nature Geoscience, Nature Climate Change, etc.
@@ -6,9 +5,12 @@ Handles Nature's distinct 'Fig. X | ...' caption syntax and grid layout.
 """
 
 import re
+
 import fitz
-from .base import BaseAdapter
+
 from family_rules import journal_family
+
+from .base import BaseAdapter
 
 
 class NatureAdapter(BaseAdapter):

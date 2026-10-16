@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Zotero GeoFigure Indexer (fig_db)
 Scans Zotero PDF attachments, extracts figures, encodes with multilingual-e5-small, saves to SQLite.
@@ -11,13 +10,20 @@ Scans Zotero PDF attachments, extracts figures, encodes with multilingual-e5-sma
 
 import os
 import re
-import sys
-import sqlite3
 import shutil
+import sqlite3
+import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
-from engine import FigureExtractor, Encoder, FigureDB, DB_PATH, resolve_abbr, _display_authors, zot_abbr_plausible
+from engine import (
+    Encoder,
+    FigureDB,
+    FigureExtractor,
+    _display_authors,
+    resolve_abbr,
+    zot_abbr_plausible,
+)
 
 ZOTERO_DIR = r"D:\Zotero"
 STORAGE_DIR = os.path.join(ZOTERO_DIR, "storage")

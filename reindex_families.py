@@ -1,12 +1,11 @@
-# -*- coding: utf-8 -*-
 """族级重抽：路由到 elsevier/agu 的全部文献用当前代码（继承 base 超集+救援）重提。
 清旧行+旧图 -> 重提 -> 入库。4 线程、进程优先级 BELOW_NORMAL（不抢占前台使用）。"""
 
-import sys
-import os
-import glob
 import ctypes
+import glob
+import os
 import sqlite3
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,9 +17,9 @@ try:
 except Exception:
     pass
 
-from engine import FigureExtractor, Encoder, FigureDB, IMAGE_DIR, CURRENT_EXTRACTOR_VERSION
-from indexer import get_zotero_items_with_pdfs
 from adapters import get_adapter
+from engine import IMAGE_DIR, Encoder, FigureDB, FigureExtractor
+from indexer import get_zotero_items_with_pdfs
 
 FAMILIES = tuple(sys.argv[1].split(",")) if len(sys.argv) > 1 else ("elsevier", "agu_wiley")
 

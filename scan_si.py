@@ -1,10 +1,9 @@
-# -*- coding: utf-8 -*-
 """定向扫描：找出需要 v1.9 重提的文献——S编号题注（Figure S1/图S2）或页数>60（曾被截断）。
 输出 si_targets.json = {"keys":[...], "stat":{...}}"""
-import sys
+import json
 import os
 import re
-import json
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -13,9 +12,10 @@ sys.path.insert(0, BASE)
 sys.stdout.reconfigure(encoding='utf-8')
 
 import fitz
+
 from indexer import get_zotero_items_with_pdfs
 
-S_PAT = re.compile(r"(?:Figure|Fig\.?)\s*S\d|图\s*S\d|附图\s*S\d", re.I)
+S_PAT = re.compile(r"(?:Figure|Fig\.?)\s*S\d|图\s*S\d|附图\s*S\d", re.IGNORECASE)
 
 
 CHECKPOINT = os.path.join(BASE, "scan_checkpoint.json")

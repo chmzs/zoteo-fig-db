@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 """
 Generic Fallback Adapter
 Handles all other publishers (AAAS/Science, Springer, Copernicus, SAGE, MDPI, etc.)
 using generalized vector path and raster bounding box fusion.
 """
 
-import fitz  # noqa: F401  (match() 签名引用)
+import fitz
 
 from .base import BaseAdapter
 

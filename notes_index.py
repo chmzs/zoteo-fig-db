@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Notes Map: item_key -> Obsidian Zotero 笔记双链 (确定性扫描)
 文件名规则: <year>_<作者>_<标题截断>_KEY-<itemKey>.md
@@ -6,9 +5,9 @@ Notes Map: item_key -> Obsidian Zotero 笔记双链 (确定性扫描)
 映射不到笔记时退化为 zotero://select 的 markdown 链接
 """
 
+import json
 import os
 import re
-import json
 import time
 
 NOTES_DIR = r"D:\Users\chmzs\Documents\PaperBell\01_输入\Zotero笔记"

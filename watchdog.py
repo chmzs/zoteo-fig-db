@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """zoteo-fig-db 看门狗（由计划任务每 5 分钟用 pythonw 静默拉起）：
 - .manual_stop 标记存在 → 尊重手动停止，退出
 - 127.0.0.1:5173 可连 → 服务已活，退出
@@ -6,7 +5,6 @@
 """
 
 import os
-import sys
 import socket
 import subprocess
 
