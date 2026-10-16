@@ -42,7 +42,7 @@ class NatureAdapter(BaseAdapter):
                 txt = b[4].strip()
                 m = nature_pattern.search(txt)
                 if m:
-                    matched_str = m.group(1).strip()
+                    matched_str = m.group(0).strip().rstrip(".:|").strip()
                     num_m = re.search(r"\d+[a-zA-Z]?", matched_str)
                     fig_num = num_m.group(0).lower() if num_m else matched_str
                     caption_text = txt.replace("\n", " ").strip()
