@@ -5,7 +5,8 @@ JOURNAL_RULES = [
     ("agu", ["geophysical research letters", "journal of geophysical research", "water resources research",
              "earth's future", "paleoceanography", "global biogeochemical", "tectonics", "space weather",
              "radio science", "geochemistry, geophysics", "reviews of geophysics", "earth and space science",
-             "agu advances", "james", "space science reviews", "geohealth", "agupubs"]),
+             "agu advances", "james", "space science reviews", "geohealth", "agupubs",
+             "jgr atmospheres"]),  # §八② 2026-10-19: 原被 mdpi "atmosphere" 子串抢走
     ("nature", ["nature communications", "nature geoscience", "nature climate change", "nature ecology & evolution",
                 "nature sustainability", "nature food", "nature water", "nature astronomy", "nature geophysics",
                 "npj climate", "communications earth", "communications environment", "communications biology",
@@ -13,7 +14,7 @@ JOURNAL_RULES = [
     ("aaas", ["science advances", "science robotics", "science immunology", "science translational medicine"]),
     ("pnas", ["proceedings of the national academy"]),
     ("elsevier", ["quaternary science reviews", "quaternary international", "quaternary geochronology",
-                  "palaeogeography", "catena", "global and planetary change", "journal of hydrology",
+                  "palaeogeography", "catena", "geomorphology", "global and planetary change", "journal of hydrology",
                   "remote sensing of environment", "earth-science reviews", "earth and planetary science letters",
                   "geochimica et cosmochimica", "chemical geology", "sedimentary geology", "marine geology",
                   "ore geology reviews", "journal of asian earth sciences", "journal of archaeological science",
@@ -33,7 +34,7 @@ JOURNAL_RULES = [
     ("wiley", ["global change biology", "ecology letters", "ecological applications", "conservation biology",
                "journal of biogeography", "functional ecology", "methods in ecology and evolution",
                "global ecology and biogeography", "ecography", "limnology and oceanography",
-               "the holocene", "journal of quaternary science", "ice ages past and environments",
+               "journal of quaternary science", "ice ages past and environments",  # §八②: "the holocene" 系 SAGE 非 Wiley，删除后落 generic（EXACT_FAMILY 的 holocene 映射一并删）
                "molecular ecology", "new phytologist", "conservation science", "diversity and distributions",
                "ecological monographs", "soil science society", "crop science", "geographical analysis",
                "quarterly journal of the royal meteorological", "international journal of climatology",
@@ -66,7 +67,7 @@ JOURNAL_RULES = [
 
 EXACT_FAMILY = {
     "nature": "nature", "science": "aaas", "pnas": "pnas",
-    "geology": "gsw", "holocene": "wiley", "catena": "elsevier",
+    "geology": "gsw", "catena": "elsevier",  # §八②: 删 "holocene": "wiley"（SAGE 刊，连 EXACT 一并去）
     "ecography": "wiley", "elementa": "copernicus", "bioscience": "oup",
 }
 

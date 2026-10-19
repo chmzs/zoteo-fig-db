@@ -161,11 +161,14 @@ class BaseAdapter:
                        if d["rect"].y1 <= cap_rect.y0 + 12 and d["rect"].y0 >= 40 and d["rect"].intersects(band)
                        and d["rect"].y1 > 64]  # 页眉带(logo/下划线/装饰)无条件排除
 
-            # 单幅位图且无矢量叠加 → 直接抽原始字节（最常见，最高保真）
-            if len(band_imgs) == 1 and not band_dr:
+            # 单幅位图且无矢量叠加、且完整落在带内 → 直接抽原始字节（最常见，最高保真）
+            # §八③: 越过带顶 = 与上邻图共享复合位图/跨带残留，禁原始直取，改带内裁切
+            if (len(band_imgs) == 1 and not band_dr
+                    and band_imgs[0]["rect"].y0 >= band.y0 - 2.0):
                 return None, band_imgs[0]
 
-        parts = [vi["rect"] for vi in band_imgs] + band_dr
+        # §八③: 证据矩形一律 ∩band 后再并（band 外部分属上邻图，不得吞入本图裁框）
+        parts = [vi["rect"] & band for vi in band_imgs] + band_dr
         if parts:
             u = parts[0]
             for r in parts[1:]:
@@ -177,6 +180,10 @@ class BaseAdapter:
                 min(page_rect.width - 25, u.x1 + 6),
                 min(cap_rect.y0 - 2, u.y1 + 6),
             )
+            # §八③: 终检不变式 clip ⊆ band——merge_spans 允许标注上探 14pt，
+            # 叠栏多图页会把上邻图的轴刻度并入 → pad 后统一回裁，越带部分判归上邻图
+            if band.height >= 60:
+                clip = clip & band
             if clip.height < 60 or clip.width < 80:
                 return fitz.Rect(band.x0, max(64, band.y0), band.x1, band.y1), None
             return clip, None
