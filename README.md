@@ -10,6 +10,7 @@
 - **出版商适配器路由**：按**刊名**（非 publisher 字段）匹配 Nature/Elsevier/AGU/中文刊等图注句法；几何定位逻辑全在 base 共享
 - **图体精准定位**：单幅位图直抽原始字节；矢量图取 `矢量路径 ∪ 位图 ∪ 紧邻文本标注` 并集；**题注上方无图形证据即拒绝**（防"正文当图"）；表格全程排除
 - **双尺寸 WebP**：原图 ≤1600px q72（对齐视觉模型 ~1568px 有效上限）+ 480px 缩略图（画廊带宽降 ~75%）
+- **面板级切分（v2.1）**：多联版面按两路线切出 `Fig. 4a/4b…` 独立行——A 文本标签严格网格（nature 实测覆盖 44%）/ B 复合位图内缝投影（elsevier 主战场，题注声明面板数为语义锚，块数≠声明数即拒切）；整图行原样保留（画廊默认视图不变），API/MCP 以 `panels=1`/`with_panels` 透传，同父多面板合并占一个检索槽位，面板独立成图独占分辨率预算
 - **混合检索**：numpy 矩阵 BLAS 余弦 + FTS5 OR 关键词召回两阶段；矩阵缓存 mmap 落盘秒级冷启动；增量追加不重建
 - **人工画廊**（`http://127.0.0.1:5173`，局域网可达）：无限滚动+content-visibility、灯箱原图、**一键跳 Zotero 打开 PDF 并定位页码**、复制 Obsidian 双链/图片嵌入/DSH 审图提示词
 - **Agent 集成**：`/api/search` 返回图路径+题注+双链，配合 `read_image` 直接进多模态视觉循环
@@ -26,7 +27,7 @@
    `schtasks /Create /F /TN "zoteo-fig-db-watchdog" /SC MINUTE /MO 5 /TR "<pythonw副本> watchdog.py"`（非 Windows 可 cron 等效）
 
 ## Agent API
-- `GET /api/search?q=&top_k≤500&offset=&journal=&year_min=&year_max=&item_key=&fig_no=` —— 语义+关键词混合检索；`item_key` 省略 `q` 即列表该篇全部图
+- `GET /api/search?q=&top_k≤500&offset=&journal=&year_min=&year_max=&item_key=&fig_no=&panels=` —— 语义+关键词混合检索；`item_key` 省略 `q` 即列表该篇全部图（裸键/`KEY-` 前缀/小写均可，2026-10-19 修复）；`panels=1` 透传面板行，默认仅整图
 - `POST /api/search` `{"q":["批量≤50条"],"top_k":20,...}` —— 批量检索；单字符串 q 返回同 GET 的扁平数组
 - `GET /api/facets` —— 期刊/家族/年份分布；`GET /image/<file>`、`/thumb/<file>` —— 原图/缩略图字节
 - `POST /api/update` `{"item_keys":[...]}` —— 定向增量入库；`GET /api/shutdown` —— 停机（看门狗尊重手动标记）
@@ -47,7 +48,9 @@ zoteo-fig-db/
 ├── batch_master.py    # 全库分批编排（家族分组/QC/断点/二分重试）— 首次建库/大版本重刷用
 ├── weekly_update.py   # 每周自动维护：库快照轮转 → 增量入库 → 孤儿图清理
 ├── batch_worker.py    # 单批执行器（逐篇 jsonl 进度 + quarantine）
-├── reindex_all.py     # 算法升级后全量重抽
+├── reindex_all.py     # 算法升级后全量重抽（limit=400 仅覆盖前 400 篇，全库升级见下）
+├── reindex_families.py # 族级定向重抽（清场后重提；面板 v2.1 全库升级通道，支持 all）
+├── panel_qc.py        # 面板切分灰度 QC（只读干跑：叠框联系表 + report.jsonl，不写主库）
 ├── watchdog.py        # 看门狗（端口体检 + detached 拉起，尊重 .manual_stop）
 ├── weekly_update.py   # 每周自动维护：库快照轮转 → 新论文增量入库 → 孤儿图清理
 ├── models/            # [不入库] e5-small INT8 ONNX 权重

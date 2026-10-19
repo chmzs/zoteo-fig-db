@@ -1,6 +1,6 @@
 # WORKORDER — 面板级切分恢复（2026-10-18）
 
-状态：待开工。执行方式：在 D:\Zotero\fig_db 工作区新开会话，对接 HANDOFF.md 说"接盘开工"，读本文件后动工。
+状态：**已完成（2026-10-19, commit e642eaa）**。§三 双路线（标签网格+位图内缝投影）落地；§四 验收通过但样本口径三处与 PDF 实际不符（Fig.4 实为 (a)(b) 两面板；UJ5TQUQP 单幅箱线被门禁正确拒切；97LJ8KDF 面板路线不可达）——详见 DEVELOPMENT_LOG §7.5。遗留三项决断（全库 v2.1 重抽/family_rules 缺口/band over-capture 修复）见 HANDOFF.md。
 
 ## 一、背景与证据（为什么恢复你曾取消的面板切分）
 
