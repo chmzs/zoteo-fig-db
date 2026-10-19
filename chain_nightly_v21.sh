@@ -48,6 +48,34 @@ stale = c.execute("SELECT COUNT(*) FROM figures WHERE extractor_version<>'2.1'")
 print(f"[chain] DB 总行={tot} 面板={pan or 0} 篇={pap} v2.1={v} 旧版残留={stale}")
 EOF
 
+# 4b. 夜跑后库备份（gitignore 内；供回退与取证）
+cp -p zotero-figures.sqlite batch_tmp/night_v21.sqlite && echo "[chain] db backup ok"
+
+# 4c. 面板复核门禁（§八.3）：三家族 dry-run 全扫 + 客观指标；超阈自动回退面板行
+for FAM in elsevier agu_wiley nature_portfolio; do
+  "$PY" -u panel_qc.py --family "$FAM" --limit 600 \
+    --out "batch_tmp/panel_qc_night_${FAM}" > "batch_tmp/qc_night_${FAM}.log" 2>&1 \
+    && echo "[chain] qc ${FAM} ok" || echo "[chain] qc ${FAM} FAILED(容错继续判)"
+done
+"$PY" -u panel_gate.py
+GATE=$?
+if [ $GATE -ne 0 ]; then
+  echo "[chain] GATE FAILED — 触发回退: DELETE origin='panel'（整图行不动）"
+  "$PY" -u - <<'EOF'
+import sqlite3
+c = sqlite3.connect("zotero-figures.sqlite", timeout=30)
+ids = [r[0] for r in c.execute("SELECT id FROM figures WHERE origin='panel'")]
+c.executemany("DELETE FROM fts_figures WHERE rowid=?", [(i,) for i in ids])
+c.execute("DELETE FROM figures WHERE origin='panel'")
+c.commit()
+tot = c.execute("SELECT COUNT(*) FROM figures").fetchone()[0]
+print(f"[chain] 回退删除面板行={len(ids)} 剩余总行={tot}")
+EOF
+  echo "PANEL_ROLLED_BACK" > batch_tmp/PANEL_GATE.json
+else
+  echo "PANEL_GATE_OK" > batch_tmp/PANEL_GATE.json
+fi
+
 # 5. 复活双服务（清手动标记 + watchdog 拉起）
 rm -f .manual_stop
 "$PY" -u watchdog.py

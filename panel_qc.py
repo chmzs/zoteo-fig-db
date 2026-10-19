@@ -155,7 +155,11 @@ def main():
     ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--force", action="store_true",
                     help="越界探针：临时对目标适配器开启 panel_split（仅 QC，不改生产）")
+    ap.add_argument("--out", default="", help="产物目录（默认 batch_tmp/panel_qc）")
     a = ap.parse_args()
+    global QC_DIR
+    if a.out:
+        QC_DIR = a.out
     os.makedirs(QC_DIR, exist_ok=True)
 
     keys = [k.strip() for k in a.keys.split(",") if k.strip()]
