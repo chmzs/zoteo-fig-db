@@ -609,6 +609,9 @@ class FigureExtractor:
                                         "bbox_pt": [round(v, 1) for v in (
                                             pl["rect"].x0, pl["rect"].y0,
                                             pl["rect"].x1, pl["rect"].y1)],
+                                        # 父图区域 pt（MCP gain 换算：整图入模时面板实得 = 1280×面板pt/父图pt）
+                                        "parent_pt": [round(v, 1) for v in (
+                                            region.x0, region.y0, region.x1, region.y1)],
                                     }, ensure_ascii=False),
                                 })
 
