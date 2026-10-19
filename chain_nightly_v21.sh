@@ -7,7 +7,7 @@ PY="D:/Users/chmzs/Documents/Pixi_env/.pixi/envs/geo/python.exe"
 echo "[chain] $(date '+%F %T') start"
 
 # 1. 停画廊 + 无条件落 .manual_stop（画廊若本已停，shutdown 不会写标记，
-#    watchdog 5 分钟内会复活 MCP 成为夜跑期读者——必须显式盖章）
+#    watchdog 5 分钟内会复活读者进程——必须显式盖章）
 curl -s -m 5 "http://127.0.0.1:5173/api/shutdown" && echo "[chain] gallery shutdown ok" || echo "[chain] gallery already down"
 touch .manual_stop
 echo "[chain] .manual_stop set"
@@ -76,14 +76,36 @@ else
   echo "PANEL_GATE_OK" > batch_tmp/PANEL_GATE.json
 fi
 
-# 5. 复活双服务（清手动标记 + watchdog 拉起）
+# 5. 复活双服务（清手动标记 + watchdog 拉起；exe 秒退则降级 python.exe 直启）
+#    2026-10-19 实测：zoteo-fig-db.exe(pythonw 副本) 会无日志静默消失；链尾不能只赌 watchdog
 rm -f .manual_stop
 "$PY" -u watchdog.py
 sleep 10
-curl -s -m 5 http://127.0.0.1:5173/api/stats && echo "" && echo "[chain] gallery back"
-curl -s -m 5 -X POST http://127.0.0.1:23122/mcp -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' >/dev/null && echo "[chain] mcp back"
+alive() { netstat -ano | grep LISTENING | grep ":$1 " >/dev/null; }
+for PORT in 5173 23122; do
+  if alive "$PORT"; then
+    echo "[chain] port $PORT back via watchdog"
+  else
+    echo "[chain] port $PORT dead after watchdog — exe 疑似秒退，降级 python.exe 直启"
+    # setsid 本机 Git Bash 无(实测)；PS5.1 Start-Process 经 bash 转义易碎(实测 ParserError)；
+    # nohup 后台本会话实测可跨调用存活(5174 实例端到端验证过)，子进程继承忽略 SIGHUP
+    case $PORT in
+      5173)  DSRV=server.py ;;
+      23122) DSRV="mcp_server.py --port 23122" ;;
+    esac
+    # shellcheck disable=SC2086
+    NO_BROWSER=1 nohup "$PY" -u $DSRV >> "batch_tmp/fallback_$PORT.log" 2>&1 &
+  fi
+done
+sleep 8
+for PORT in 5173 23122; do
+  if alive "$PORT"; then
+    echo "[chain] FINAL: port $PORT listening"
+  else
+    echo "[chain] FINAL: port $PORT STILL DEAD — 人工查 batch_tmp/fallback_$PORT.log"
+  fi
+done
+curl -s -m 5 http://127.0.0.1:5173/api/stats && echo ""
 
 echo "CHAIN_V21_DONE" > batch_tmp/FINAL_DONE.json
 echo "[chain] $(date '+%F %T') ALL DONE"
