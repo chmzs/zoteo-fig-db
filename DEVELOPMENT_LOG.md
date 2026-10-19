@@ -78,4 +78,9 @@
 
 **7.4 版本重提必须先清场（灰度踩实）。** `indexer --force` 不清旧行：v1.7 带换行 `Fig.\n1` 与 v2.1 `Fig. 1` 在 UNIQUE 下不同键并存 → 25 重复行。补救=归一化（去全部非字母数字）比对、只删"存在 2.1 等价行"的旧行（KEEP=0 保证零丢失），文件交 `weekly_update.orphan_gc()` 引用反查（清 406 文件/9MB）。正通道=`reindex_families.py`（先 DELETE 行+删图再提）。`reindex_all.py` 的 `limit=400` 只覆盖前 400 篇、其余静默留旧行——历史缺陷挂账，全库升级勿用它。
 
+**7.6 面板化的分辨率收益在查看端，不在抽取端（2026-10-19 补正）。** §7.3 记录"增益中位 x1.00"后一度以为面板化只剩检索价值。补查根因：整图入模时父图被压到 ≤1280，面板只分到 `1280 × (面板pt/父图pt)`。28 个灰度面板的 share 分布 0.37–1.00，对应实得 480–1280px——**占满整幅宽度的面板（如 JYGMPNRM Fig.4b share=0.98）面板化后仍只有 1.0×，而 share=0.37 的 RZI7LYJF Fig.3a 可达 2.67×**。所以"面板有没有用"不是面板本身的属性，而是"该面板在原图里占多大比例"的函数。
+对应到 MCP：`panel` 参数把面板那块像素单独交给模型，gain 值随 text 一并返回，调用方据此判断值不值得切。工单§四.1 原定"JYGMPNRM Fig.4b gain≥1.5"是选错了样本——它本身就没有收益空间；换成 RZI7LYJF Fig.3a（gain 2.67）验收，判据不变而样本可判定。
+
+**7.7 panels_json 的 parent_pt 与检索缓存陷阱。** gain 换算需要父图 pt 尺寸，故 panels_json 增 `parent_pt`。回填 28 行后发现 MCP 仍读旧值——searcher 的 meta 来自磁盘缓存 `cache/embed_meta.pkl`，而缓存签名只看 `(count, MAX(indexed_at), MAX(id))`，**UPDATE panels_json 不动这三项 → 缓存不失效**（AGENTS 不变量 3 的原话）。修复=删 cache/embed_* 后重启。教训：任何"只改内容不改计数的 UPDATE"都必须显式清缓存，别指望签名兜。
+
 **7.5 验收三样本与 PDF 实际的偏差（工单§四）。** JYGMPNRM Fig.4 题注只声明 (a)(b) 两面板（工单写 a–d）→ 切 4a/4b 通过；UJ5TQUQP Fig.2 系单幅箱线（"sites ordered by latitude"，题注无面板段）→ 门禁拒切=正确行为；97LJ8KDF 路由 generic（SAGE 不在首波）且版式=上表格+下 700×358 位图（原生低于 1280 上限，切了零增益）→ **该验收项面板路线不可达**，后续验收样本应以 nature 多联矢量图为代表。回退演练：删 28 面板行→15,061 整图行，检索行为与今日一致 ✓。
