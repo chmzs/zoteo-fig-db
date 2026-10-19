@@ -9,6 +9,7 @@ Zotero GeoFigure Engine (fig_db)
 """
 
 import io
+import json
 import os
 import re
 import sqlite3
@@ -25,7 +26,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(BASE_DIR, "models", "multilingual-e5-small")
 DB_PATH = os.path.join(BASE_DIR, "zotero-figures.sqlite")
 IMAGE_DIR = os.path.join(BASE_DIR, "cache", "figures")
-CURRENT_EXTRACTOR_VERSION = "2.0"   # 全局版本戳（figures.extractor_version 唯一来源）
+CURRENT_EXTRACTOR_VERSION = "2.1"   # 全局版本戳（figures.extractor_version 唯一来源）；2.1=面板级切分
 WEBP_QUALITY = 72
 MAX_FULL_SIDE = 1600
 THUMB_MAX_SIDE = 480
@@ -237,6 +238,8 @@ class FigureDB:
             embedding BLOB,
             indexed_at INTEGER,
             extractor_version TEXT DEFAULT '1.2',
+            panels_json TEXT,
+            origin TEXT DEFAULT 'whole',
             UNIQUE(item_key, fig_no)
         );
         """)
@@ -250,6 +253,10 @@ class FigureDB:
             cursor.execute("ALTER TABLE figures ADD COLUMN journal_abbr TEXT DEFAULT '';")
         if "authors" not in _cols:
             cursor.execute("ALTER TABLE figures ADD COLUMN authors TEXT DEFAULT '';")
+        if "panels_json" not in _cols:
+            cursor.execute("ALTER TABLE figures ADD COLUMN panels_json TEXT;")
+        if "origin" not in _cols:
+            cursor.execute("ALTER TABLE figures ADD COLUMN origin TEXT DEFAULT 'whole';")
 
         cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_figures USING fts5(
@@ -274,9 +281,9 @@ class FigureDB:
         INSERT OR REPLACE INTO figures (
             item_key, att_key, title, year, journal, journal_abbr, authors, fig_no, caption, 
             context_text, image_path, page_no, embedding, 
-            indexed_at, extractor_version
+            indexed_at, extractor_version, panels_json, origin
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             record["item_key"],
             record.get("att_key", ""),
@@ -292,7 +299,9 @@ class FigureDB:
             record.get("page_no", 1),
             emb_blob,
             int(time.time()),
-            CURRENT_EXTRACTOR_VERSION  # 全局版本戳单点引用,
+            CURRENT_EXTRACTOR_VERSION,  # 全局版本戳单点引用
+            record.get("panels_json"),
+            record.get("origin", "whole"),
         ))
         row_id = cursor.lastrowid
         cursor.execute("""
@@ -367,6 +376,74 @@ class FigureExtractor:
             t.save(webp_path[:-5] + ".thumb.webp", "WEBP", quality=WEBP_QUALITY, method=4)
         except Exception:
             pass
+
+    # ---- 面板渲染（v2.1）----
+
+    def _panel_zoom(self, rect):
+        """面板渲染缩放：长边目标 1600px（视觉模型有效上限），限幅 2.8~8.0x（≈200~576dpi）。
+        面板独占预算 → 查看端 1280 上限下即满面板分辨率。"""
+        z = MAX_FULL_SIDE / max(1.0, rect.width, rect.height)
+        return max(2.8, min(8.0, z))
+
+    @staticmethod
+    def _decoded_image(doc, xref, cache):
+        """按 xref 懒解码原始位图（同幅复合大图被多面板共享，只解一次）。"""
+        if xref in cache:
+            return cache[xref]
+        im = None
+        try:
+            raw = doc.extract_image(xref)["image"]
+            im = Image.open(io.BytesIO(raw))
+            if im.mode in ("RGBA", "P", "LA", "CMYK"):
+                im = im.convert("RGB")
+        except Exception:
+            im = None
+        cache[xref] = im
+        return im
+
+    def _save_panel(self, doc, page, panel, valid_images, decode_cache, webp_path):
+        """面板成图：优先裁原始位图像素（原生分辨率零重采样，复合大图按 pt→px 映射裁剪），
+        否则按自适应 zoom 渲染页面裁块。成功返回 True。"""
+        rect = panel["rect"]
+        pa = max(1.0, rect.get_area())
+        best = None
+        for vi in valid_images:
+            r = vi["rect"]
+            if not r or r.width <= 0 or r.height <= 0:
+                continue
+            inter = r & rect
+            if not inter.is_valid:
+                continue
+            cov = inter.get_area() / pa
+            if cov >= 0.85 and (best is None or cov > best[0]):
+                best = (cov, vi)
+        if best:
+            vi = best[1]
+            im = self._decoded_image(doc, vi["xref"], decode_cache)
+            if im is not None:
+                sx = im.width / vi["rect"].width
+                sy = im.height / vi["rect"].height
+                box = (max(0, int((rect.x0 - vi["rect"].x0) * sx)),
+                       max(0, int((rect.y0 - vi["rect"].y0) * sy)),
+                       min(im.width, int((rect.x1 - vi["rect"].x0) * sx)),
+                       min(im.height, int((rect.y1 - vi["rect"].y0) * sy)))
+                if box[2] - box[0] >= 80 and box[3] - box[1] >= 80:
+                    try:
+                        crop = im.crop(box)
+                        self._save_full(crop, webp_path)
+                        self._save_thumb(crop, webp_path)
+                        return True
+                    except Exception:
+                        return False
+        try:
+            z = self._panel_zoom(rect)
+            pix = page.get_pixmap(clip=rect, matrix=fitz.Matrix(z, z), alpha=False)
+            im2 = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            self._save_full(im2, webp_path)
+            self._save_thumb(im2, webp_path)
+            return True
+        except Exception:
+            return False
 
     def extract_from_pdf(self, pdf_path, item_key, att_key="", title="", year=0, journal=""):
         if not os.path.exists(pdf_path):
@@ -480,6 +557,61 @@ class FigureExtractor:
                         "page_no": page_idx + 1,
                     })
 
+                    # ---- 面板级切分（v2.1）：整图行照旧，另加子面板独立行 ----
+                    # fig_no 已带字母者本身就是面板级题注，不再二次切
+                    if adapter.panel_split and not re.search(r"[a-zA-Z]$", cap["fig_no"]):
+                        region = clip_rect if clip_rect is not None else (
+                            matched_raster["rect"] if matched_raster else None)
+                        if region is not None and region.width >= 120 and region.height >= 120:
+                            decode_cache = {}
+                            raster = None
+                            dom = max(
+                                (vi for vi in valid_images if vi["rect"] and (vi["rect"] & region).is_valid
+                                 and (vi["rect"] & region).get_area() / max(1.0, region.get_area()) >= 0.60),
+                                key=lambda vi: (vi["rect"] & region).get_area(), default=None)
+                            if dom is not None:
+                                im_r = self._decoded_image(doc, dom["xref"], decode_cache)
+                                if im_r is not None:
+                                    raster = {"image": im_r, "rect": dom["rect"]}
+                            panels = adapter.detect_panels(
+                                page=page, fig_rect=region, valid_images=valid_images,
+                                page_drawings=page_drawings, parent_caption=cap["caption"], raster=raster)
+                            for pl in panels:
+                                p_fig_no = f"{cap['fig_no']}{pl['letter']}"
+                                p_name = f"{item_key}_{re.sub(r'[^\w\d]', '_', p_fig_no)}_p{page_idx + 1}.webp"
+                                p_path = os.path.join(self.output_dir, p_name)
+                                if not self._save_panel(doc, page, pl, valid_images, decode_cache, p_path):
+                                    continue
+                                p_thumb = ""
+                                p_cand = p_path[:-5] + ".thumb.webp"
+                                if os.path.exists(p_cand):
+                                    p_thumb = os.path.basename(p_cand)
+                                results.append({
+                                    "item_key": item_key,
+                                    "att_key": att_key,
+                                    "title": title,
+                                    "year": year,
+                                    "journal": journal,
+                                    "fig_no": p_fig_no,
+                                    "caption": pl["caption"],
+                                    "context_text": "",
+                                    "image_path": p_path,
+                                    "thumb_name": p_thumb,
+                                    "page_no": page_idx + 1,
+                                    "origin": "panel",
+                                    "panels_json": json.dumps({
+                                        "parent_fig": cap["fig_no"],
+                                        "letter": pl["letter"],
+                                        "row": pl["row"],
+                                        "col": pl["col"],
+                                        "n_panels": len(panels),
+                                        "source": pl.get("source", "label"),
+                                        "bbox_pt": [round(v, 1) for v in (
+                                            pl["rect"].x0, pl["rect"].y0,
+                                            pl["rect"].x1, pl["rect"].y1)],
+                                    }, ensure_ascii=False),
+                                })
+
         doc.close()
         return results
 
@@ -540,7 +672,7 @@ class FigureSearcher:
 
     def _load_row(self, r):
         (r_id, item_key, att_key, title, year, journal, journal_abbr, authors, fig_no,
-         caption, ctx, img_path, page_no, emb_blob) = r
+         caption, ctx, img_path, page_no, emb_blob, origin, panels_json) = r
         emb = np.frombuffer(emb_blob, dtype=np.float32) if emb_blob else np.zeros(384, dtype=np.float32)
         thumb_name = ""
         if img_path and img_path.lower().endswith(".webp"):
@@ -562,6 +694,8 @@ class FigureSearcher:
             "image_path": img_path,
             "thumb_name": thumb_name,
             "page_no": page_no,
+            "origin": origin or "whole",
+            "panels_json": panels_json or "",
             "_cap_l": (caption or "").lower(),
             "_title_l": (title or "").lower(),
             "_fig_l": (fig_no or "").lower(),
@@ -571,7 +705,7 @@ class FigureSearcher:
         return emb, meta
 
     _COLS = ("SELECT id, item_key, att_key, title, year, journal, journal_abbr, authors, fig_no, caption, "
-             "context_text, image_path, page_no, embedding FROM figures")
+             "context_text, image_path, page_no, embedding, origin, panels_json FROM figures")
 
     def _ensure_cache(self):
         sig = self._signature()
@@ -654,7 +788,7 @@ class FigureSearcher:
             return []
 
     def search(self, query, top_k=20, journal_filter=None, year_min=None, year_max=None,
-               item_key=None, fig_no=None, offset=0):
+               item_key=None, fig_no=None, offset=0, origin=None):
         query = (query or "").strip()
         if not query and not (item_key or journal_filter or fig_no or year_min or year_max):
             return []  # 无词且无过滤 = 空操作(防全库 dump)
@@ -665,8 +799,26 @@ class FigureSearcher:
 
         from notes_index import clean_wikilink_alias, make_wikilink
 
+        jf = journal_filter.lower() if journal_filter else None
+        ymin = int(year_min) if year_min else None
+        ymax = int(year_max) if year_max else None
+        # KEY- 前缀口径归一（消费端两种写法都要能命中，见 2026-10-18 工单§二.6）
+        ik = re.sub(r"^KEY-", "", (item_key or "").strip(), flags=re.IGNORECASE).upper() or None
+        fg = fig_no.strip().lower() if fig_no else None
+        org = (origin or "").strip().lower() or None  # None=全部 / whole=仅整图 / panel=仅面板
+
         n = len(self._metas)
-        if query:
+        if ik:
+            # 单篇限定：候选=该篇全部行（几十行，全量扫 metas 零成本）。
+            # 不再走 top-K 相似池：泛词查询(如 Holocene)的池/FTS 截断会把目标篇整篇挤出候选
+            # → 曾致 item_key 过滤静默返空（工单§二.6 实测 bug）。
+            sims = None
+            if query:
+                q_emb = self.encoder.encode_query(query)
+                sims = self._M @ q_emb
+            cand_idx = [i for i, m in enumerate(self._metas)
+                        if (m["item_key"] or "").upper() == ik]
+        elif query:
             q_emb = self.encoder.encode_query(query)
             sims = self._M @ q_emb
             pool = int(max(200, (top_k + offset) * 10))
@@ -681,12 +833,6 @@ class FigureSearcher:
             sims = None  # 纯过滤列表模式：按入库序输出,不算分
             cand_idx = list(range(n))
 
-        jf = journal_filter.lower() if journal_filter else None
-        ymin = int(year_min) if year_min else None
-        ymax = int(year_max) if year_max else None
-        ik = item_key.strip().upper() if item_key else None
-        fg = fig_no.strip().lower() if fig_no else None
-
         q_lower = query.lower()
         scored = []
         seen_cand = set()
@@ -695,6 +841,8 @@ class FigureSearcher:
                 continue
             seen_cand.add(i)
             m = self._metas[i]
+            if org and (m.get("origin") or "whole") != org:
+                continue
             if jf and jf not in (m["journal"] or "").lower():
                 continue
             if ymin is not None and (m["year"] or 0) < ymin:
@@ -743,6 +891,8 @@ class FigureSearcher:
                 "image_path": m["image_path"],
                 "thumb_name": m["thumb_name"],
                 "page_no": m["page_no"],
+                "origin": m.get("origin") or "whole",
+                "panels_json": m.get("panels_json") or "",
                 "wikilink": wikilink,
                 "link_kind": link_kind,
                 "score": round(final_score, 4),

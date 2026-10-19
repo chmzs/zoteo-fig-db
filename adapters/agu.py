@@ -13,6 +13,7 @@ from .base import BaseAdapter
 
 class AGUAdapter(BaseAdapter):
     name = "agu_wiley"
+    panel_split = True  # 多联图重灾区，标签网格+证据链可守
 
     AGU_KEYWORDS = [
         "Geophysical Research Letters", "Journal of Geophysical Research",

@@ -6,11 +6,17 @@ Defines the interface for publisher-specific PDF layout adapters.
 import re
 
 import fitz
+import numpy as np
 
 
 class BaseAdapter:
     """Base class for all publisher-specific PDF layout adapters."""
     name = "base"
+    # 面板级切分开关：仅多联图重灾区且有图形证据链可守的家族开启（elsevier/agu/nature）。
+    # chinese/generic 双栏混排易误切 → 只出整图，等误切率数据说话再扩。
+    panel_split = False
+    # 独立成 span 的单字母面板标签："(a)" "a" "(b)." 等
+    PANEL_LABEL_RE = re.compile(r"^[\[\(\{]?\s*([a-z])\s*[\]\)\}]?[\.:]?$")
 
     def match(self, journal: str, doc: fitz.Document) -> bool:
         """Return True if this adapter handles the journal/publisher."""
@@ -192,6 +198,376 @@ class BaseAdapter:
 
         # 两个方向都没有图形证据：假题注，拒绝，绝不盲裁
         return None, None
+
+    # ---------------- 位图内缝切分（v2.1 路线 B：复合位图的面板字母烧死在像素里） ----------------
+    # 实测（2026-10-19, 41 篇/323 父图）：elsevier 文本层面板标签仅 1.8%，77% 父图为位图主导；
+    # nature 反之（标签 44.4%、位图主导 17%）。故两路线互补：
+    #   路线 A _panel_labels+网格 —— 只对矢量标注版面有效；
+    #   路线 B 本函数 —— 复合位图内部相对极小值缝 + 题注声明面板数做语义锚。
+
+    RASTER_WORK_SIDE = 1400     # 投影工作分辨率上限（长边），够判缝且免整幅 4000px 逐元
+    RASTER_VALLEY_REL = 0.22    # 缝深判据：缝内峰值 ≤ 块内 p90 墨量 × 0.22
+    RASTER_GUTTER_MIN = 0.008   # 缝宽 ≥ 该轴长度 0.8%
+    RASTER_SIDE_MIN = 0.12      # 切出的两侧各承载 ≥12% 墨量（防削色标/图例当面板）
+    RASTER_LEAF_MIN = 0.08      # 终叶墨量 ≥ 全图 8%
+
+    def _raster_ink(self, im):
+        """RGB → 墨迹布尔阵：暗或饱和即墨（白底与米白底都算空）。"""
+        a = np.asarray(im.convert("RGB"), dtype=np.int16)
+        return (a.max(axis=2) - a.min(axis=2) > 25) | (a.mean(axis=2) < 210)
+
+    def _best_cut(self, ink, box):
+        """框内找最强相对极小值缝。返回 (score, axis, mid, depth_ratio, frac) 或 None。"""
+        x0, y0, x1, y1 = box
+        sub = ink[y0:y1, x0:x1]
+        h, w = sub.shape
+        total = int(sub.sum())
+        if total <= 0 or h < 40 or w < 40:
+            return None
+        profs = ((0, sub.mean(axis=0), w), (1, sub.mean(axis=1), h))
+        ref = max(1e-6, float(np.percentile(np.concatenate([p for _, p, _ in profs]), 90)))
+        thr = self.RASTER_VALLEY_REL * ref
+        best = None
+        for axis, prof, n in profs:
+            low = prof < thr
+            i = 0
+            while i < n:
+                if not low[i]:
+                    i += 1
+                    continue
+                j = i
+                while j < n and low[j]:
+                    j += 1
+                mid = int((i + j) / 2)
+                if (j - i) >= max(2, int(self.RASTER_GUTTER_MIN * n)) and 0 < mid < n - 1:
+                    if axis == 0:
+                        lm, rm = int(sub[:, :mid].sum()), int(sub[:, mid:].sum())
+                    else:
+                        lm, rm = int(sub[:mid].sum()), int(sub[mid:].sum())
+                    frac = min(lm, rm) / total
+                    if frac >= self.RASTER_SIDE_MIN:
+                        depth_ratio = float(prof[i:j].max()) / ref
+                        strength = frac * (1.0 - depth_ratio)
+                        score = strength + (j - i) / n
+                        if best is None or score > best[0]:
+                            best = (score, axis, (x0 if axis == 0 else y0) + mid, depth_ratio, frac, strength)
+                i = j
+        if best is None:
+            return None
+        return (best[0], best[1], best[2], best[3], best[4], best[5])
+
+    def _cut_tree(self, ink, box, depth=0):
+        """递归二分建树。节点 {box, axis, mid, strength, kids}。"""
+        node = {"box": box, "axis": None, "mid": None, "strength": None, "kids": []}
+        if depth >= 3:
+            return node
+        best = self._best_cut(ink, box)
+        if best is None:
+            return node
+        _score, axis, mid = best[0], best[1], best[2]
+        node["axis"], node["mid"], node["strength"] = axis, mid, best[5]
+        x0, y0, x1, y1 = box
+        if axis == 0:
+            left, right = (x0, y0, mid, y1), (mid, y0, x1, y1)
+        else:
+            left, right = (x0, y0, x1, mid), (x0, mid, x1, y1)
+        if left[2] - left[0] < 40 or right[2] - right[0] < 40 or left[3] - left[1] < 40 or right[3] - right[1] < 40:
+            return node
+        node["kids"] = [self._cut_tree(ink, left, depth + 1), self._cut_tree(ink, right, depth + 1)]
+        return node
+
+    @staticmethod
+    def _tree_leaves(node):
+        if not node["kids"]:
+            return [node["box"]]
+        return BaseAdapter._tree_leaves(node["kids"][0]) + BaseAdapter._tree_leaves(node["kids"][1])
+
+    def _tree_collapse_to(self, node, n):
+        """叶数多于目标时塌缩"最弱缝"（同缝两侧本就铺满父框 → 精确无重叠）。
+        返回叶框列表；无法恰好收敛到 n 返回 None。"""
+        leaves = self._tree_leaves(node)
+        while len(leaves) > n:
+            worst, wkey = None, None
+            stack = [node]
+            while stack:
+                nd = stack.pop()
+                if nd["kids"]:
+                    if wkey is None or nd["strength"] < wkey:
+                        wkey, worst = nd["strength"], nd
+                    stack.extend(nd["kids"])
+            if worst is None:
+                return None
+            worst["kids"], worst["axis"], worst["mid"], worst["strength"] = [], None, None, None
+            leaves = self._tree_leaves(node)
+        return leaves if len(leaves) == n else None
+
+    @staticmethod
+    def _tight(ink, box):
+        """框内收边到墨迹包围盒。"""
+        x0, y0, x1, y1 = box
+        sub = ink[y0:y1, x0:x1]
+        ys, xs = np.where(sub)
+        if len(xs) == 0:
+            return None
+        return (x0 + int(xs.min()), y0 + int(ys.min()), x0 + int(xs.max()) + 1, y0 + int(ys.max()) + 1)
+
+    def detect_panels_raster(self, raster, parent_caption):
+        """复合位图 → 子面板（pt 坐标）。语义锚：题注必须声明 >=2 面板分句，否则不切。
+
+        几何分块数与声明数不一致 → 按缝强度塌缩；仍不等或任一叶墨量 <8% → 拒切（不盲裁）。
+        """
+        if not self.panel_split or raster is None:
+            return []
+        segs, lead = self._caption_segments(parent_caption)
+        n = len(segs)
+        if n < 2:
+            return []
+        im, rr = raster["image"], raster["rect"]
+        if im is None or rr is None or rr.width <= 0 or rr.height <= 0 or im.width < 120 or im.height < 120:
+            return []
+        k = min(1.0, self.RASTER_WORK_SIDE / float(max(im.size)))
+        work = im if k == 1.0 else im.resize((max(1, int(im.width * k)), max(1, int(im.height * k))))
+        ink = self._raster_ink(work)
+        total = float(ink.sum())
+        if total <= 0:
+            return []
+        tree = self._cut_tree(ink, (0, 0, work.width, work.height))
+        boxes = self._tree_collapse_to(tree, n)
+        if not boxes or len(boxes) < 2:
+            return []
+        pad = 3.0
+        out = []
+        for b in boxes:
+            t = self._tight(ink, b)
+            if t is None:
+                return []
+            if float(ink[t[1]:t[3], t[0]:t[2]].sum()) / total < self.RASTER_LEAF_MIN:
+                return []
+            inv = 1.0 / k
+            rect = fitz.Rect(rr.x0 + t[0] * inv / (im.width / rr.width) - pad,
+                             rr.y0 + t[1] * inv / (im.height / rr.height) - pad,
+                             rr.x0 + t[2] * inv / (im.width / rr.width) + pad,
+                             rr.y0 + t[3] * inv / (im.height / rr.height) + pad) & rr
+            if not rect.is_valid or rect.width < 40 or rect.height < 40:
+                return []
+            out.append({"rect": fitz.Rect(rect)})
+        # 阅读序定字母（行聚簇后按 x）
+        out.sort(key=lambda d: (d["rect"].y0, d["rect"].x0))
+        rows, cur = [], []
+        for d in out:
+            r = d["rect"]
+            if not cur:
+                cur = [d]
+                continue
+            prev = cur[-1]["rect"]
+            oy = min(prev.y1, r.y1) - max(prev.y0, r.y0)
+            if oy > 0.5 * min(prev.height, r.height):
+                cur.append(d)
+            else:
+                rows.append(cur)
+                cur = [d]
+        rows.append(cur)
+        ordered = []
+        for row in sorted(rows, key=lambda rr_: min(d["rect"].y0 for d in rr_)):
+            ordered.extend(sorted(row, key=lambda d: d["rect"].x0))
+        letters = sorted(segs)
+        if len(ordered) != n:
+            return []
+        prefix = self._panel_fig_no_prefix(parent_caption)
+        res = []
+        for i, d in enumerate(ordered):
+            l = letters[i]
+            d["letter"] = l
+            d["caption"] = f"{prefix}{l}. {lead} {segs[l]}".strip()
+            d["row"], d["col"], d["source"] = 0, i, "raster"
+            res.append(d)
+        return res
+
+
+    # ---------------- 面板级切分（v2.1，WORKORDER_panel_split_2026-10-18） ----------------
+
+    def _panel_labels(self, page, fig_rect):
+        """图形区域内找单字母面板标签：独立短 span、字号 ≤13、严格在题注上界之内。
+        题注正文里的行内 (a) 位于 fig_rect.y1 之下 → 天然排除，不会把题注当标签。"""
+        out = []
+        probe = fitz.Rect(fig_rect.x0, max(40.0, fig_rect.y0 - 4), fig_rect.x1, fig_rect.y1 - 2)
+        try:
+            blocks = page.get_text("dict")["blocks"]
+        except Exception:
+            return out
+        for blk in blocks:
+            if blk.get("type", 0) != 0:
+                continue
+            for line in blk.get("lines", []):
+                for s in line.get("spans", []):
+                    t = (s.get("text") or "").strip()
+                    if not t or len(t) > 4:
+                        continue
+                    m = self.PANEL_LABEL_RE.match(t)
+                    if not m:
+                        continue
+                    if (s.get("size") or 0) > 13:
+                        continue
+                    r = fitz.Rect(s["bbox"])
+                    if r.y1 > probe.y1 or r.y0 < probe.y0 - 2 or not r.intersects(probe):
+                        continue
+                    out.append((m.group(1), r))
+        return out
+
+    @staticmethod
+    def _cluster_anchors(vals, gap):
+        """把标签坐标聚成网格行/列锚点（簇内最小值定标）。"""
+        vs = sorted(vals)
+        clusters = [[vs[0]]]
+        for v in vs[1:]:
+            if v - clusters[-1][-1] <= gap:
+                clusters[-1].append(v)
+            else:
+                clusters.append([v])
+        return [c[0] for c in clusters]
+
+    @staticmethod
+    def _band_index(anchors, mid, v):
+        for i in range(len(anchors) - 1):
+            if v < mid[i + 1] - 1e-6:
+                return i
+        return len(anchors) - 1
+
+    def detect_panels(self, page, fig_rect, valid_images, page_drawings, parent_caption="", raster=None):
+        """子面板切分。返回 [{'letter','rect','caption','source'}]；不过门禁返回 []（不切）。
+
+        路线 A（标签网格）→ 失败时路线 B（复合位图内缝 + 题注声明数锚）。
+
+        门禁（不变量 1：宁宽勿裁，绝不盲裁）：
+        1. 标签集 = 从 'a' 起连续字母、≥2 个、无重复（重复 = 图内散点/图例误捕）；
+        2. 严格网格：行簇 × 列簇 == 标签数，且一格一标签；
+        3. 分带取相邻锚点中点（top-left 与 bottom-left 两种标签习惯都不偏切）；
+        4. 每格必须有图形证据（位图覆盖格面积 ≥35% 或中心在格内的矢量路径），
+           任一格无证据 → 整组拒切（绝不盲裁）；
+        5. 裁后单面板 <60pt 或 <1200pt² → 整组拒切；有效面板 <2 → 不切。
+        """
+        if not self.panel_split or fig_rect is None:
+            return []
+        labels = self._panel_labels(page, fig_rect)
+        out = self._panels_from_labels(labels, fig_rect, valid_images, page_drawings, parent_caption, page)
+        if out:
+            return out
+        return self.detect_panels_raster(raster, parent_caption)
+
+    def _panels_from_labels(self, labels, fig_rect, valid_images, page_drawings, parent_caption, page):
+        """路线 A：文本层单字母标签的严格网格切分。"""
+        if len(labels) < 2:
+            return []
+        letters = sorted({l for l, _ in labels})
+        if len(letters) != len(labels):
+            return []  # 同字母多次出现：散点标注/图例，非面板网格
+        if letters != [chr(97 + i) for i in range(len(letters))]:
+            return []  # 必须 a 起头连续
+        rects = {l: r for l, r in labels}
+
+        row_anchors = self._cluster_anchors([r.y0 for r in rects.values()], 20.0)
+        col_anchors = self._cluster_anchors([r.x0 for r in rects.values()], 20.0)
+        if len(row_anchors) * len(col_anchors) != len(rects):
+            return []  # 非规整网格 → 不切
+        row_mid = [fig_rect.y0] + [(row_anchors[i] + row_anchors[i + 1]) / 2
+                                   for i in range(len(row_anchors) - 1)] + [fig_rect.y1]
+        col_mid = [fig_rect.x0] + [(col_anchors[i] + col_anchors[i + 1]) / 2
+                                   for i in range(len(col_anchors) - 1)] + [fig_rect.x1]
+
+        cells = {}
+        for l, r in rects.items():
+            ri = self._band_index(row_anchors, row_mid, r.y0)
+            ci = self._band_index(col_anchors, col_mid, r.x0)
+            if (ri, ci) in cells:
+                return []  # 同格双标签 → 网格判定失败
+            cells[(ri, ci)] = (l, fitz.Rect(col_mid[ci], row_mid[ri], col_mid[ci + 1], row_mid[ri + 1]))
+
+        segs, lead = self._caption_segments(parent_caption)
+        fig_prefix = self._panel_fig_no_prefix(parent_caption)
+        out = []
+        for (ri, ci), (l, cell) in sorted(cells.items()):
+            ink = self._panel_ink(page, cell, valid_images, page_drawings)
+            if ink is None:
+                return []  # 任一格无图形证据 → 整组拒切
+            if ink.width < 60 or ink.height < 60 or ink.get_area() < 1200:
+                return []
+            seg = segs.get(l, "")
+            cap = f"{fig_prefix}{l}. {lead} {seg}".strip() if seg else f"（面板 {l}）{parent_caption}"
+            out.append({"letter": l, "rect": ink, "caption": cap, "row": ri, "col": ci,
+                        "source": "label"})
+        if len(out) < 2:
+            return []
+        return out
+
+    def _panel_ink(self, page, cell, valid_images, page_drawings):
+        """格内图形证据并集：位图（按覆盖格面积比 ≥0.35 供证，复合大图可同时为多格供证）
+        ∪ 中心落在格内的矢量路径 ∪ 格内刻度/单位文字，最后 ∩cell 收边。
+        无图形证据返回 None（刻度文字不算独立证据）。"""
+        parts = []
+        cell_area = max(1.0, cell.get_area())
+        for vi in valid_images:
+            r = vi["rect"]
+            if not r:
+                continue
+            inter = r & cell
+            if not inter.is_valid or inter.get_area() / cell_area < 0.35:
+                continue
+            parts.append(fitz.Rect(inter))
+        for d in page_drawings:
+            r = d["rect"]
+            if r.y1 <= 64:
+                continue
+            cx, cy = (r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0
+            if cell.contains(fitz.Point(cx, cy)):
+                parts.append(fitz.Rect(r))
+        if not parts:
+            return None
+        u = parts[0]
+        for r in parts[1:]:
+            u = u | r
+        if u.get_area() < 1200:
+            return None
+        # 刻度数字/轴单位/色标文字并入（否则面板裁掉轴刻度），再 ∩cell 防吃到邻栏
+        u = self._merge_spans(page, u, None, max(40.0, cell.y0 - 10), cell.y1 + 10, 10.0, 10.0)
+        u = u & cell
+        return u if u.is_valid and u.get_area() >= 1200 else None
+
+    _CAP_SEG_SPLIT = re.compile(r"[\[\(\{]\s*([a-z])\s*[\]\)\}][\.\:\s]")
+
+    @classmethod
+    def _caption_segments(cls, caption):
+        """父题注按 '(a) … (b) …' 分句 → ({letter: 分句}, 主句)。
+
+        门禁：分句 <20 字符、成段字母 <2、或字母不从 'a' 连续 → 判"无可信面板题注"
+        返回 ({}, 主句)。字母缺口（如 (a)(c) 跳 b）说明有面板没写成段，照用必错配，
+        宁可整组继承父题注。主句 = 第一个标记之前的文字，供面板题注前置。"""
+        if not caption:
+            return {}, ""
+        parts = cls._CAP_SEG_SPLIT.split(caption)
+        # parts = [主句, l1, body1, l2, body2, ...]
+        lead = re.sub(r"^\s*(?:(?:Supplementary|Supplemental|Appendix|Extended\s+Data)\s+)?"
+                      r"(?:Fig(?:ure)?\.?|图|附图)\s*S?\d+[a-zA-Z]?[\.\:\s]*", "", parts[0],
+                      flags=re.IGNORECASE).strip()
+        found = {}
+        for i in range(1, len(parts) - 1, 2):
+            body = re.sub(r"\s+", " ", parts[i + 1]).strip()
+            if len(body) >= 20:
+                found[parts[i]] = body
+        if len(found) < 2:
+            return {}, lead
+        letters = sorted(found)
+        if letters != [chr(97 + i) for i in range(len(letters))]:
+            return {}, lead
+        return found, lead
+
+    @staticmethod
+    def _panel_fig_no_prefix(parent_caption):
+        """面板题注编号前缀：取父题注开头的 'Fig. 4' / 'Figure S2' / '图 3'，拼字母用。"""
+        m = re.match(
+            r"^\s*((?:(?:Supplementary|Supplemental|Appendix|Extended\s+Data)\s+)?"
+            r"(?:Fig(?:ure)?\.?|图|附图)\s*S?\d+[a-zA-Z]?)",
+            parent_caption or "", re.IGNORECASE)
+        return m.group(1).strip().rstrip(".") if m else "Fig."
 
     def _merge_spans(self, page, u, text_spans, y_top, y_bottom, pad_above, pad_below):
         """合并图形近旁的文本标注：刻度数字、轴单位、面板字母 (a)(b)、色标文字（懒计算）。"""

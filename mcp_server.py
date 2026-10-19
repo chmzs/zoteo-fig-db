@@ -5,6 +5,7 @@ Supports both local stdio transport and remote streamable-http transport.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -33,59 +34,95 @@ def get_searcher() -> FigureSearcher:
     return searcher
 
 
+def _parent_of(hit):
+    """整图行=自身 fig_no；面板行=panels_json.parent_fig（同父多面板合并用）。"""
+    if hit.get("origin") == "panel" and hit.get("panels_json"):
+        try:
+            return json.loads(hit["panels_json"]).get("parent_fig") or hit.get("fig_no", "")
+        except Exception:
+            pass
+    return hit.get("fig_no", "")
+
+
+def _group_by_parent(hits):
+    """按 (item_key, parent) 归并，保序；同父多面板占一个槽位（工单§二.5）。"""
+    groups, index = [], {}
+    for h in hits:
+        k = (h.get("item_key", ""), _parent_of(h))
+        if k not in index:
+            index[k] = len(groups)
+            groups.append([])
+        groups[index[k]].append(h)
+    return groups
+
+
 @mcp.tool()
 def search_figures(
     query: str,
     item_key: str = "",
     top_k: int = 3,
     return_image: bool = True,
+    with_panels: bool = True,
 ) -> list:
     """
-    检索地学文献图表。支持语义与关键词检索，直接返回图注元数据及第一张图的多模态图像流。
+    检索地学文献图表。支持语义与关键词检索，直接返回图注元数据及图像流（面板行优先，独占分辨率预算）。
 
     参数:
     - query: 检索词（如 'Altai pollen Holocene', 'Bosten lake level age model'）
-    - item_key: 可选的文献 KEY（如 '5L2UE86C'），限定在单篇文献内检索
-    - top_k: 返回图表数量（1-10，默认 3）
-    - return_image: 是否在返回结果中直接内嵌首张图表的图像流（默认 True）
+    - item_key: 可选的文献 KEY（如 '5L2UE86C' 或 'KEY-5L2UE86C'），限定在单篇文献内检索
+    - top_k: 返回图表数量（1-10，默认 3；同父多面板合并计一个槽位）
+    - return_image: 是否内嵌图像流（默认 True，最多 3 张）
+    - with_panels: 是否透传子面板行（默认 True）；False 只回整图行（旧行为）
     """
     s = get_searcher()
     top_k = max(1, min(10, top_k))
     clean_key = item_key.replace("KEY-", "").strip() if item_key else None
-    hits = s.search(query=query, item_key=clean_key, top_k=top_k)
+    # 面板行独占 1280 预算 → 排序时优先取面板，整图同父则合并展示
+    hits = s.search(query=query, item_key=clean_key, top_k=top_k * 4,
+                   origin=None if with_panels else "whole")
 
     if not hits:
         msg = f"未找到匹配的图表（query='{query}', item_key='{item_key}'）。"
         return [msg]
 
-    lines = [f"找到 {len(hits)} 张相关图表：\n"]
-    first_image_path = None
+    groups = _group_by_parent(hits)[:top_k]
+    lines = [f"找到 {sum(len(g) for g in groups)} 张相关图表（{len(groups)} 个图号）：\n"]
+    image_paths = []
 
-    for i, h in enumerate(hits, 1):
-        ik = h.get("item_key", "")
-        fno = h.get("fig_no", "Figure")
-        yr = h.get("year", "")
-        author = h.get("authors", "")
-        journal = h.get("journal_abbr") or h.get("journal", "")
-        caption = h.get("caption", "").strip()
-        img_path = h.get("image_path", "")
-        score = h.get("score", 0.0)
-
-        lines.append(f"[{i}] {author} ({yr}, {journal}) — {fno} [KEY: {ik}]")
+    for i, grp in enumerate(groups, 1):
+        h0 = grp[0]
+        ik = h0.get("item_key", "")
+        parent = _parent_of(h0)
+        yr = h0.get("year", "")
+        author = h0.get("authors", "")
+        journal = h0.get("journal_abbr") or h0.get("journal", "")
+        score = max(h.get("score", 0.0) for h in grp)
+        panels = [h for h in grp if h.get("origin") == "panel"]
+        tag = f"（含 {len(panels)} 个面板）" if panels else ""
+        lines.append(f"[{i}] {author} ({yr}, {journal}) — {parent} [KEY: {ik}]{tag}")
         lines.append(f"    得分: {score:.3f}")
-        lines.append(f"    图注: {caption}")
-        lines.append(f"    本地路径: {img_path}\n")
-
-        if i == 1 and img_path and os.path.exists(img_path):
-            first_image_path = img_path
+        for h in grp:
+            is_panel = h.get("origin") == "panel"
+            label = h.get("fig_no", "Figure")
+            cap = h.get("caption", "").strip()
+            lines.append(f"    - {label}: {cap}")
+            lines.append(f"      路径: {h.get('image_path', '')}")
+        lines.append("")
+        # 图像流：有面板优先给面板（原生分辨率），否则给整图
+        picks = panels if panels else [h0]
+        for h in picks:
+            p = h.get("image_path", "")
+            if p and os.path.exists(p) and p not in image_paths:
+                image_paths.append(p)
 
     results = ["\n".join(lines)]
 
-    if return_image and first_image_path:
-        try:
-            results.append(MCPImage(path=first_image_path))
-        except Exception as e:
-            results.append(f"[注意：首图图像流封装失败: {e}]")
+    if return_image:
+        for p in image_paths[:3]:
+            try:
+                results.append(MCPImage(path=p))
+            except Exception as e:
+                results.append(f"[注意：图像流封装失败 {os.path.basename(p)}: {e}]")
 
     return results
 
@@ -119,18 +156,19 @@ def list_paper_figures(item_key: str) -> str:
     """
     clean_key = item_key.replace("KEY-", "").strip()
     s = get_searcher()
-    hits = s.search(query="", item_key=clean_key, top_k=50)
+    hits = s.search(query="", item_key=clean_key, top_k=200)
 
     if not hits:
         return f"未找到文献 {clean_key} 的图表记录。"
 
-    lines = [f"文献 {clean_key} 共收录 {len(hits)} 张图表：\n"]
+    lines = [f"文献 {clean_key} 共收录 {len(hits)} 条图录（整图+面板）：\n"]
     for i, h in enumerate(hits, 1):
         fno = h.get("fig_no", "Figure")
         page = h.get("page_no", "")
         caption = h.get("caption", "").strip()
         fname = os.path.basename(h.get("image_path", ""))
-        lines.append(f"{i}. {fno} (第 {page} 页) [{fname}]")
+        mark = "  ⟦面板⟧" if h.get("origin") == "panel" else ""
+        lines.append(f"{i}. {fno} (第 {page} 页) [{fname}]{mark}")
         lines.append(f"   图注: {caption}\n")
 
     return "\n".join(lines)

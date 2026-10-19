@@ -15,6 +15,7 @@ from .base import BaseAdapter
 
 class NatureAdapter(BaseAdapter):
     name = "nature_portfolio"
+    panel_split = True  # 多联图重灾区，标签网格+证据链可守
 
     NATURE_KEYWORDS = [
         "Nature", "Nat Commun", "Nat. Commun.", "Nature Communications",

@@ -13,6 +13,7 @@ from .base import BaseAdapter
 
 class ElsevierAdapter(BaseAdapter):
     name = "elsevier"
+    panel_split = True  # 多联图重灾区，标签网格+证据链可守
 
     ELSEVIER_KEYWORDS = [
         "Quaternary Science Reviews", "Palaeogeography, Palaeoclimatology, Palaeoecology",

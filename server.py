@@ -766,6 +766,8 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             item_key = query.get("item_key", [None])[0]
             fig_no = query.get("fig_no", [None])[0]
             offset = int(query.get("offset", ["0"])[0] or 0)
+            # 画廊默认只出整图行（工单§二.2：默认视图不变）；panels=1 才透传面板行
+            origin = None if query.get("panels", ["0"])[0] in ("1", "true", "yes") else "whole"
 
             results = searcher.search(
                 query=q,
@@ -776,6 +778,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 item_key=item_key,
                 fig_no=fig_no,
                 offset=offset,
+                origin=origin,
             )
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -871,7 +874,8 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             top_k = max(1, min(500, int(body.get("top_k", 20))))
             kw = dict(journal_filter=body.get("journal"), year_min=body.get("year_min"),
                       year_max=body.get("year_max"), item_key=body.get("item_key"),
-                      fig_no=body.get("fig_no"), offset=int(body.get("offset", 0) or 0))
+                      fig_no=body.get("fig_no"), offset=int(body.get("offset", 0) or 0),
+                      origin=None if str(body.get("panels", "0")).lower() in ("1", "true", "yes") else "whole")
             out = [searcher.search(x, top_k=top_k, **kw) for x in qlist]
             payload = out[0] if single else {"results": out}
             self.send_response(200)
