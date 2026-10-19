@@ -167,8 +167,12 @@ class BaseAdapter:
                     and band_imgs[0]["rect"].y0 >= band.y0 - 2.0):
                 return None, band_imgs[0]
 
-        # §八③: 证据矩形一律 ∩band 后再并（band 外部分属上邻图，不得吞入本图裁框）
-        parts = [vi["rect"] & band for vi in band_imgs] + band_dr
+        # §八③: 证据矩形一律 ∩band 后再并（band 外部分属上邻图，不得吞入本图裁框）。
+        # 位图中心 y 在带顶之上 → 整幅判属上邻图，直接剔除（叠栏版面里左列图会延伸
+        # 到右列题注之下，只 ∩ 仍吞残片；JYGMPNRM Fig.5 吞 Fig.4 底 83pt 实测教训）
+        parts = [(vi["rect"] & band) for vi in band_imgs
+                 if (vi["rect"].y0 + vi["rect"].y1) / 2.0 >= band.y0] + band_dr
+        parts = [p for p in parts if p.is_valid and p.get_area() > 0]
         if parts:
             u = parts[0]
             for r in parts[1:]:
