@@ -57,3 +57,31 @@ curl -s http://127.0.0.1:5173/api/stats
 curl -s "http://127.0.0.1:5173/api/search?q=Taro+Co&item_key=JYGMPNRM&top_k=10"   # bug 修复验收
 # 面板验收：返回中应出现 Fig. 4a–d；MCP 侧 list_paper_figures('JYGMPNRM')
 ```
+
+
+## 八、lead 拍板执行包（2026-10-19 验收通过，裁决 ②→③+① 今晚一批跑）
+
+### ② family_rules 三缺口补丁草案（先改，防止夜抽吃错路由）
+```python
+# JOURNAL_RULES 内三处：
+# 1) jgr-atmospheres 被 mdpi 抢走 → 在 mdpi 条目之前插 agu 行（元组顺序即优先级）：
+("agu", [..., "jgr atmospheres", "journal of geophysical research atmospheres"]),   # 置于 ("mdpi",...) 之前
+# 2) Geomorphology 是 Elsevier → 并入 elsevier 列表：
+"geomorphology",
+# 3) The Holocene 是 SAGE 非 Wiley → 从 wiley 列表删除 "the holocene" 条目，落 generic（SAGE 适配器属已知待办，不阻塞本批）。
+```
+改后跑项目计数回归（§五测试方法论固定样本集零漂移）+ 抽一篇 JGR-Atmospheres 文献验路由（batch_master 家族归属日志 / get_adapter 返回值）。
+
+### ③ locate band over-capture 修复（随 ① 生效，一行级）
+`adapters/base.locate_figure_box`：band 定框后 `clip = evidence_rect ∩ band`（JYGMPNRM Fig.5 吞入 Fig.4 区为实测样本，修复后目检顶/底 230px 条带确认无邻图残留）。
+
+### ① 全库 v2.1 重抽执行序
+1. `curl -s "http://127.0.0.1:5173/api/shutdown"`（写 .manual_stop 停画廊，防长读事务锁撞；watchdog 尊重标记不复活）
+2. 通道 `reindex_families.py elsevier,agu_wiley,nature_portfolio`（禁 reindex_all.py，limit=400 历史坑）；先清场=先 DELETE 行+删文件再提（remove_item 模式），checkpoint 每 200 条
+3. 夜跑 ~2–5h，明晨 `panel_qc.py` 扫描器复核 + 目视抽检 5%；误切率 <5% 收，≥5% 触发 `DELETE WHERE origin='panel'` 回退（整图行不动）
+4. 完事双击 `启动 zoteo-fig-db.bat`（清 .manual_stop 复活画廊+MCP），`/api/stats` 核对行数，更新 DEVELOPMENT_LOG 与 HANDOFF
+5. 本地领先 GitHub 的全部 commit（含 lead 验收包本条）一并 push——由执行会话在跑完后统一推，勿中途推半成品
+
+### 验收遗留挂账（非本批）
+- 4E49JHNC `图１` 全角变体簇、FIGURE 7/Figure 7 大小写簇：① 重抽后按归一化比对顺带清；
+- 工单头 sed 追加验收行未生效（fig-db 会话已自行改写"状态"行，lead 记录以 DEVELOPMENT_LOG §7 + 本§八 为准）。
