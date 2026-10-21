@@ -200,6 +200,18 @@ class BaseAdapter:
             if clip_b is not None or raster_b is not None:
                 return clip_b, raster_b
 
+        # ---- 回退路径：竖排题注（rotation=90 横向大图页；题注竖排在页面侧缘）----
+        # 判据（可判定）：题注块高 > 3×宽 且 高 > 页面高 50%——竖排窄条。
+        # 这类页图占满其余版面，band（题注上方）必然塌成几 pt，主路径必失效。
+        # 实测样本：Kramer 2010 p8/p10/p11/p14，cap=(515,53,530,744) w=15pt h=691pt，
+        # 位图 bbox 覆盖整页左部；原逻辑 band 高仅 7.8pt < 60 门槛 → 图被丢弃。
+        if (cap_rect.height > 3.0 * max(1.0, cap_rect.width)
+                and cap_rect.height > page_rect.height * 0.5):
+            clip_v, raster_v = self._figure_beside_vertical_caption(
+                page, cap_rect, valid_images, page_drawings, text_spans)
+            if clip_v is not None or raster_v is not None:
+                return clip_v, raster_v
+
         # ---- 回退路径：题注与图左右并排（老刊侧置图注版式；限窄题注块）----
         if cap_rect.width < page_rect.width * 0.5:
             clip_s, raster_s = self._figure_beside_caption(
@@ -687,4 +699,68 @@ class BaseAdapter:
                              min(page_rect.height - 40, u.y1 + 6))
             if clip.height >= 60 and clip.width >= 80:
                 return clip, None
+        return None, None
+
+    def _figure_beside_vertical_caption(self, page, cap_rect, valid_images, page_drawings, text_spans):
+        """竖排题注版式（rotation=90 横向大图页）：题注是页面侧缘的窄高条，图占据其余版面。
+
+        与 _figure_beside_caption 的区别（后者专为"横向并排的老刊侧置题注"设计，
+        带 r.height<=540 / union 高<=560 的守卫，会把横版大图整幅排除）：
+        - 不做尺寸排除：横版页的图本就接近整页（实测 1913x1267 铺满 51..507 x 54..742）；
+        - 侧向带取题注对侧的全部版面，用位图/矢量证据并集定框；
+        - 仍守不变量 1：该侧无任何图形证据 → 返回 None（不盲裁）。
+        """
+        page_rect = page.rect
+        # 题注偏右 → 图在左；题注偏左 → 图在右
+        cap_center_x = (cap_rect.x0 + cap_rect.x1) / 2.0
+        if cap_center_x > page_rect.width / 2.0:
+            win = fitz.Rect(25.0, max(40.0, cap_rect.y0 - 10),
+                            max(25.0, cap_rect.x0 - 4), min(page_rect.height - 25, cap_rect.y1 + 10))
+        else:
+            win = fitz.Rect(min(page_rect.width - 25, cap_rect.x1 + 4), max(40.0, cap_rect.y0 - 10),
+                            page_rect.width - 25, min(page_rect.height - 25, cap_rect.y1 + 10))
+        if win.width < 120 or win.height < 120:
+            return None, None
+
+        cand_imgs = []
+        for vi in valid_images:
+            r = vi["rect"]
+            if not r or not r.intersects(win):
+                continue
+            inter = r & win
+            if not inter.is_valid:
+                continue
+            # 位图须实质落在该侧版面（≥40% 面积），否则判属邻栏/页眉装饰
+            if inter.get_area() / max(1.0, r.get_area()) < 0.40:
+                continue
+            cand_imgs.append((inter, vi))
+        cand_dr = [d["rect"] & win for d in page_drawings
+                   if d["rect"].intersects(win) and d["rect"].y0 >= 40
+                   and (d["rect"] & win).is_valid]
+
+        if len(cand_imgs) == 1 and not cand_dr:
+            inter, vi = cand_imgs[0]
+            # 位图基本被该侧完整容纳 → 直取原始字节（零重采样）
+            if inter.get_area() / max(1.0, vi["rect"].get_area()) >= 0.92:
+                return None, vi
+            clip = fitz.Rect(max(25, inter.x0 - 4), max(40, inter.y0 - 4),
+                             min(page_rect.width - 25, inter.x1 + 4),
+                             min(page_rect.height - 25, inter.y1 + 4))
+            if clip.height >= 60 and clip.width >= 80:
+                return clip, None
+            return None, None
+
+        parts = [inter for inter, _ in cand_imgs] + cand_dr
+        if not parts:
+            return None, None   # 该侧无图形证据 → 拒绝（不盲裁）
+        u = parts[0]
+        for r in parts[1:]:
+            u = u | r
+        u = self._merge_spans(page, u, text_spans, max(40.0, win.y0), win.y1, 12.0, 12.0)
+        u = u & win
+        clip = fitz.Rect(max(25, u.x0 - 6), max(40, u.y0 - 6),
+                         min(page_rect.width - 25, u.x1 + 6),
+                         min(page_rect.height - 25, u.y1 + 6))
+        if clip.height >= 60 and clip.width >= 80:
+            return clip, None
         return None, None
