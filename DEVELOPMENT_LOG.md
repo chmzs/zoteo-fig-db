@@ -84,3 +84,18 @@
 **7.7 panels_json 的 parent_pt 与检索缓存陷阱。** gain 换算需要父图 pt 尺寸，故 panels_json 增 `parent_pt`。回填 28 行后发现 MCP 仍读旧值——searcher 的 meta 来自磁盘缓存 `cache/embed_meta.pkl`，而缓存签名只看 `(count, MAX(indexed_at), MAX(id))`，**UPDATE panels_json 不动这三项 → 缓存不失效**（AGENTS 不变量 3 的原话）。修复=删 cache/embed_* 后重启。教训：任何"只改内容不改计数的 UPDATE"都必须显式清缓存，别指望签名兜。
 
 **7.5 验收三样本与 PDF 实际的偏差（工单§四）。** JYGMPNRM Fig.4 题注只声明 (a)(b) 两面板（工单写 a–d）→ 切 4a/4b 通过；UJ5TQUQP Fig.2 系单幅箱线（"sites ordered by latitude"，题注无面板段）→ 门禁拒切=正确行为；97LJ8KDF 路由 generic（SAGE 不在首波）且版式=上表格+下 700×358 位图（原生低于 1280 上限，切了零增益）→ **该验收项面板路线不可达**，后续验收样本应以 nature 多联矢量图为代表。回退演练：删 28 面板行→15,061 整图行，检索行为与今日一致 ✓。
+
+## 8. PDF 引擎选型（2026-10-21 定案：维持 PyMuPDF）
+
+**8.1 需求盘点（实测 grep 全库，只用 5 个 API）。** ①`get_image_info(xrefs=True)` 位图原生像素+页面坐标 bbox（定位与原生像素裁剪的命脉）；②`extract_image` 取原始字节（零重采样）；③`get_drawings` 矢量路径；④`get_pixmap(clip,matrix)` 按矩形渲染；⑤`get_text` 题注块与 span bbox。
+
+**8.2 候选实测矩阵（同一样本 PDF 对拍）。**
+- **PyMuPDF 1.27.2**：5/5 全覆盖，能力最强；**许可证 AGPL-3.0 / 商业双许可**，而项目 README 声明 MIT 且已公开 push——这是唯一硬伤。
+- **pypdfium2 5.13**（BSD-3/Apache-2.0，PDFium 内核）：4.5/5。`get_bounds`+`get_px_size`+`get_data`+`render`+`get_textpage` 齐备；但 `get_bounds` 返回**对象本地坐标**（实测 0,0,343,285.8），要经 `get_matrix`（PdfMatrix a,b,c,d,e,f）手工变换到页面坐标，而 MuPDF 直接给页面 bbox（37.6,55.6,380.6,341.5）。矢量路径能计数、取矩形需自算。
+- **pdfplumber 0.11**（MIT）：位图能力意外地好——`images` 直接给 `srcsize=(1429,1191)`+bbox+**`tag:'Figure'` 结构标记**；但矢量路径拿不到（rects=0/curves=0），渲染慢。
+- **pypdf 6.14**（BSD）：仅文本+原始 XObject 字节，无 bbox 无渲染，不够用。
+
+**8.3 决策：维持 PyMuPDF（用户裁决 A）。** 理由：本项目为个人研究用途、图库与 DB 均不入库（仓库只含代码），AGPL 的实际暴露面可接受；迁移 pypdfium2 需重写坐标变换与矢量路径提取（约 1-2 天 + 全量回归），收益不抵成本。**若将来要对外提供服务或商业分发，第一优先是买 Artifex 商业授权，其次才是迁 pypdfium2。**
+
+**8.4 一个反直觉实测。** 该 CATENA 样本页 `get_drawings()` 返回 **0 条路径**——Elsevier 很多"看起来是矢量"的图实为整幅位图。这解释了为何位图内缝切分（路线 B）在 elsevier 是主力，也说明 `get_drawings` 在本库的实际权重低于预期。
+
