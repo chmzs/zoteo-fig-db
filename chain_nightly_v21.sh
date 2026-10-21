@@ -29,11 +29,14 @@ for FAM in elsevier agu_wiley nature_portfolio; do
   echo "[chain] $(date '+%F %T') reindex ${FAM}"
   "$PY" -u reindex_families.py "$FAM" > "batch_tmp/reindex_${FAM}.log" 2>&1
   RC=$?
+  NF=$(grep -c "EXTRACT_FAIL\|INSERT_FAIL" "batch_tmp/reindex_${FAM}.log" 2>/dev/null || echo 0)
+  NP=$(grep -c " -> " "batch_tmp/reindex_${FAM}.log" 2>/dev/null || echo 0)
+  echo "[chain] ${FAM}: 完成篇=${NP} 异常行=${NF}"
   if [ $RC -eq 0 ]; then
-    echo "{\"family\":\"$FAM\",\"ts\":\"$(date -Iseconds)\"}" > "batch_tmp/NIGHT_DONE_${FAM}.json"
-    echo "[chain] $(date '+%F %T') ${FAM} DONE"
+    echo "{\"family\":\"$FAM\",\"ts\":\"$(date -Iseconds)\",\"done\":${NP},\"fail\":${NF}}" > "batch_tmp/NIGHT_DONE_${FAM}.json"
+    echo "[chain] $(date '+%F %T') ${FAM} DONE (fail=${NF})"
   else
-    echo "[chain] ${FAM} FAILED rc=$RC — 中止，查 batch_tmp/reindex_${FAM}.log"
+    echo "[chain] ${FAM} FAILED rc=$RC — 已按篇标记，重跑本链可续；查 batch_tmp/reindex_${FAM}.log"
     exit 1
   fi
 done
