@@ -76,7 +76,9 @@ def main():
         if figs is None:
             figs = []
 
-        # 抽取成功才清场（删行 + 删旧图文件）
+        # 抽取成功才清场（删行 + 删旧图文件）。
+        # 关键：extract_from_pdf 在抽取时已写出新图文件，清场只能删"不在新结果里的旧文件"，
+        # 否则会把刚写出的新图一并删掉（2026-10-23 夜跑实测回归：6685 个 v2.1 行图片全丢）。
         conn = db.get_conn()
         ids = [r[0] for r in conn.execute("SELECT id FROM figures WHERE item_key=?", (key,)).fetchall()]
         if ids:
@@ -87,7 +89,12 @@ def main():
             conn.execute("DELETE FROM figures WHERE item_key=?", (key,))
             conn.commit()
         conn.close()
+        new_files = {os.path.basename(f["image_path"]) for f in figs if f.get("image_path")}
+        # 缩略图同名派生（xxx.webp -> xxx.thumb.webp）
+        new_files |= {fn[:-5] + ".thumb.webp" for fn in new_files if fn.endswith(".webp")}
         for fp in glob.glob(os.path.join(IMAGE_DIR, f"{key}_*")):
+            if os.path.basename(fp) in new_files:
+                continue  # 新抽取写出的文件，保留
             try:
                 os.remove(fp)
             except OSError:
