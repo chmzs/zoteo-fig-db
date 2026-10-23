@@ -107,6 +107,7 @@ def main():
                 f["embedding"] = enc.encode(f["caption"])
                 f["journal_abbr"] = p.get("journal_abbr", "")
                 f["authors"] = p.get("authors", "")
+                f["context_text"] = p.get("abstract") or ""
                 db.insert_figure(f)
                 written += 1
             except Exception as e:

@@ -58,6 +58,7 @@ def main():
             f["embedding"] = encoder.encode(f["caption"])
             f["journal_abbr"] = p.get("journal_abbr", "")
             f["authors"] = p.get("authors", "")
+            f["context_text"] = p.get("abstract") or ""
         return figs
 
     with open(out_prefix + ".papers.jsonl", "w", encoding="utf-8") as fp, \

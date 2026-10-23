@@ -71,7 +71,8 @@ def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
         (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'date') as date_val,
         (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'publicationTitle') as journal,
         (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'journalAbbreviation') as journal_abbr,
-        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'publisher') as publisher
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'publisher') as publisher,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'abstractNote') as abstract
     FROM itemAttachments ia
     JOIN items att_i ON ia.itemID = att_i.itemID
     JOIN items i ON ia.parentItemID = i.itemID
@@ -111,7 +112,7 @@ def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
     by_item = {}
     order = []
     for r in rows:
-        item_key, att_key, att_path, title, date_val, journal, journal_abbr, publisher = r
+        item_key, att_key, att_path, title, date_val, journal, journal_abbr, publisher, abstract = r
         if item_key not in by_item:
             by_item[item_key] = {
                 "item_key": item_key,
@@ -120,6 +121,7 @@ def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
                 "journal": journal or "",
                 "journal_abbr": (journal_abbr or "").strip(),
                 "publisher": (publisher or "").strip(),
+                "abstract": (abstract or "").strip(),
                 "attachments": [],
             }
             order.append(item_key)
@@ -167,6 +169,7 @@ def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
             "journal": info["journal"],
             "journal_abbr_raw": info.get("journal_abbr", ""),
             "authors": _display_authors(a[0] if a else ""),
+            "abstract": info.get("abstract", ""),
             "n_pdfs": len(candidates),
         })
         if limit and len(results) >= limit:
@@ -223,6 +226,7 @@ def index_papers(papers, force_reindex=False):
             f["embedding"] = emb
             f["journal_abbr"] = p.get("journal_abbr") or ""
             f["authors"] = p.get("authors") or ""
+            f["context_text"] = p.get("abstract") or ""
             db.insert_figure(f)
             total_extracted += 1
 
