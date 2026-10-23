@@ -108,6 +108,7 @@ def main():
                 f["journal_abbr"] = p.get("journal_abbr", "")
                 f["authors"] = p.get("authors", "")
                 f["context_text"] = p.get("abstract") or ""
+                f["authors_norm"] = p.get("authors_norm") or ""
                 db.insert_figure(f)
                 written += 1
             except Exception as e:

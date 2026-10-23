@@ -344,6 +344,15 @@ HTML_CONTENT = """<!DOCTYPE html>
             <input type="text" id="searchInput" class="search-input" placeholder="输入自然语言或关键词（例如：全新世降水对比 / lake organic carbon / Tibetan Plateau warming）..." autofocus>
             <button class="btn-search" onclick="doSearch()">搜 索</button>
         </div>
+        <div class="filter-row" style="gap:8px; flex-wrap:wrap;">
+            <input type="text" id="fAuthor" placeholder="作者（中文/拼音/英文，如 唐丽雅 / Tang）" style="flex:1; min-width:180px; padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+            <select id="fJournal" style="padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px; max-width:260px;">
+                <option value="">全部期刊</option>
+            </select>
+            <input type="number" id="fYearMin" placeholder="年起" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+            <input type="number" id="fYearMax" placeholder="年止" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+            <button class="btn-search" style="padding:6px 14px; font-size:13px;" onclick="clearFilters()">清空过滤</button>
+        </div>
         <div class="filter-row">
             <span>快捷预设:</span>
             <div class="quick-tags">
@@ -392,9 +401,43 @@ HTML_CONTENT = """<!DOCTYPE html>
             } catch(e) {}
         }
 
+        // ---- 结构化过滤（作者/期刊/年份）：与语义 q 正交叠加，不做开关 ----
+        function filterParams() {
+            const p = [];
+            const a = document.getElementById('fAuthor').value.trim();
+            const j = document.getElementById('fJournal').value;
+            const y1 = document.getElementById('fYearMin').value;
+            const y2 = document.getElementById('fYearMax').value;
+            if (a) p.push('author=' + encodeURIComponent(a));
+            if (j) p.push('journal=' + encodeURIComponent(j) + '&journal_exact=1');
+            if (y1) p.push('year_min=' + y1);
+            if (y2) p.push('year_max=' + y2);
+            return p.length ? '&' + p.join('&') : '';
+        }
+        function clearFilters() {
+            document.getElementById('fAuthor').value = '';
+            document.getElementById('fJournal').value = '';
+            document.getElementById('fYearMin').value = '';
+            document.getElementById('fYearMax').value = '';
+            doSearch();
+        }
+        async function loadJournalOptions() {
+            try {
+                const res = await fetch('/api/facets');
+                const data = await res.json();
+                const sel = document.getElementById('fJournal');
+                (data.journals || []).forEach(([j, n]) => {
+                    const o = document.createElement('option');
+                    o.value = j; o.textContent = j + ' (' + n + ')';
+                    sel.appendChild(o);
+                });
+            } catch(e) {}
+        }
+
         async function doSearch() {
             const q = document.getElementById('searchInput').value.trim();
-            if (!q) return;
+            const fp = filterParams();
+            if (!q && !fp) return;
 
             lastQuery = q;
             const gallery = document.getElementById('gallery');
@@ -402,7 +445,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 
             fetchTopK = 100;
             try {
-                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&top_k=${fetchTopK}`);
+                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&top_k=${fetchTopK}${fp}`);
                 const data = await res.json();
                 currentResults = data;
                 renderGallery(data);
@@ -484,7 +527,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             if (!next.length && currentResults.length >= fetchTopK && fetchTopK < 500) {
                 fetchTopK += 100;
                 try {
-                    const rr = await fetch(`/api/search?q=${encodeURIComponent(lastQuery)}&top_k=${fetchTopK}`);
+                    const rr = await fetch(`/api/search?q=${encodeURIComponent(lastQuery)}&top_k=${fetchTopK}${filterParams()}`);
                     currentResults = await rr.json();
                 } catch(e) {}
                 next = currentResults.slice(loadedCount, loadedCount + BATCH);
@@ -700,6 +743,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 
         // 初始不加载任何图片：避免打开网页就拉全库；等用户输入或点快捷预设
         loadStats();
+        loadJournalOptions();
         document.getElementById('gallery').innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 60px 0;">输入关键词或点击上方快捷预设，开始语义检索图表</div>';
     </script>
     <div style="text-align:center;color:#64748b;font-size:11px;padding:10px 0 16px;" id="addrbar"></div>
@@ -765,6 +809,8 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             year_max = query.get("year_max", [None])[0]
             item_key = query.get("item_key", [None])[0]
             fig_no = query.get("fig_no", [None])[0]
+            author = query.get("author", [None])[0]
+            journal_exact = query.get("journal_exact", ["0"])[0] in ("1", "true", "yes")
             offset = int(query.get("offset", ["0"])[0] or 0)
             # 画廊默认只出整图行（工单§二.2：默认视图不变）；panels=1 才透传面板行
             origin = None if query.get("panels", ["0"])[0] in ("1", "true", "yes") else "whole"
@@ -779,6 +825,8 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 fig_no=fig_no,
                 offset=offset,
                 origin=origin,
+                author=author,
+                journal_exact=journal_exact,
             )
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -875,7 +923,9 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             kw = dict(journal_filter=body.get("journal"), year_min=body.get("year_min"),
                       year_max=body.get("year_max"), item_key=body.get("item_key"),
                       fig_no=body.get("fig_no"), offset=int(body.get("offset", 0) or 0),
-                      origin=None if str(body.get("panels", "0")).lower() in ("1", "true", "yes") else "whole")
+                      origin=None if str(body.get("panels", "0")).lower() in ("1", "true", "yes") else "whole",
+                      author=body.get("author"),
+                      journal_exact=str(body.get("journal_exact", "0")).lower() in ("1", "true", "yes"))
             out = [searcher.search(x, top_k=top_k, **kw) for x in qlist]
             payload = out[0] if single else {"results": out}
             self.send_response(200)
@@ -959,9 +1009,10 @@ def reachable_urls():
 
 
 def run():
-    server_address = ("0.0.0.0", PORT)
+    bind_host = os.environ.get("GEO_FIGURE_HOST", "100.64.0.10")
+    server_address = (bind_host, PORT)
     httpd = ThreadingHTTPServer(server_address, ZoteoFigHandler)
-    print(f"zoteo-fig-db running at http://0.0.0.0:{PORT}")
+    print(f"zoteo-fig-db running at http://{bind_host}:{PORT}")
     for u in reachable_urls():
         print(f"  reachable: {u}")
 
@@ -971,7 +1022,7 @@ def run():
             time.sleep(0.3)
             try:
                 import webbrowser
-                webbrowser.open(f"http://127.0.0.1:{PORT}")
+                webbrowser.open(f"http://{bind_host}:{PORT}")
             except Exception:
                 pass
         import threading
@@ -997,13 +1048,14 @@ def run():
 
 
 if __name__ == "__main__":
+    bind_host = os.environ.get("GEO_FIGURE_HOST", "100.64.0.10")
     import socket
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        in_use = (s.connect_ex(("127.0.0.1", PORT)) == 0)
+        in_use = (s.connect_ex((bind_host, PORT)) == 0)
 
     if in_use:
         import webbrowser
-        webbrowser.open(f"http://127.0.0.1:{PORT}")
+        webbrowser.open(f"http://{bind_host}:{PORT}")
         sys.exit(0)
 
     run()

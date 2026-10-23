@@ -17,6 +17,7 @@ import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
+from author_norm import build_authors_norm
 from engine import (
     Encoder,
     FigureDB,
@@ -169,6 +170,7 @@ def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
             "journal": info["journal"],
             "journal_abbr_raw": info.get("journal_abbr", ""),
             "authors": _display_authors(a[0] if a else ""),
+            "authors_norm": build_authors_norm(a),  # 全部作者归一（中文↔拼音检索用）
             "abstract": info.get("abstract", ""),
             "n_pdfs": len(candidates),
         })
@@ -227,6 +229,7 @@ def index_papers(papers, force_reindex=False):
             f["journal_abbr"] = p.get("journal_abbr") or ""
             f["authors"] = p.get("authors") or ""
             f["context_text"] = p.get("abstract") or ""
+            f["authors_norm"] = p.get("authors_norm") or ""
             db.insert_figure(f)
             total_extracted += 1
 

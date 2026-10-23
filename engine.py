@@ -240,6 +240,7 @@ class FigureDB:
             extractor_version TEXT DEFAULT '1.2',
             panels_json TEXT,
             origin TEXT DEFAULT 'whole',
+            authors_norm TEXT DEFAULT '',
             UNIQUE(item_key, fig_no)
         );
         """)
@@ -257,6 +258,8 @@ class FigureDB:
             cursor.execute("ALTER TABLE figures ADD COLUMN panels_json TEXT;")
         if "origin" not in _cols:
             cursor.execute("ALTER TABLE figures ADD COLUMN origin TEXT DEFAULT 'whole';")
+        if "authors_norm" not in _cols:
+            cursor.execute("ALTER TABLE figures ADD COLUMN authors_norm TEXT DEFAULT '';")
 
         cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_figures USING fts5(
@@ -281,9 +284,9 @@ class FigureDB:
         INSERT OR REPLACE INTO figures (
             item_key, att_key, title, year, journal, journal_abbr, authors, fig_no, caption, 
             context_text, image_path, page_no, embedding, 
-            indexed_at, extractor_version, panels_json, origin
+            indexed_at, extractor_version, panels_json, origin, authors_norm
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             record["item_key"],
             record.get("att_key", ""),
@@ -302,6 +305,7 @@ class FigureDB:
             CURRENT_EXTRACTOR_VERSION,  # 全局版本戳单点引用
             record.get("panels_json"),
             record.get("origin", "whole"),
+            record.get("authors_norm", ""),
         ))
         row_id = cursor.lastrowid
         cursor.execute("""
@@ -675,7 +679,7 @@ class FigureSearcher:
 
     def _load_row(self, r):
         (r_id, item_key, att_key, title, year, journal, journal_abbr, authors, fig_no,
-         caption, ctx, img_path, page_no, emb_blob, origin, panels_json) = r
+         caption, ctx, img_path, page_no, emb_blob, origin, panels_json, authors_norm) = r
         emb = np.frombuffer(emb_blob, dtype=np.float32) if emb_blob else np.zeros(384, dtype=np.float32)
         thumb_name = ""
         if img_path and img_path.lower().endswith(".webp"):
@@ -699,6 +703,7 @@ class FigureSearcher:
             "page_no": page_no,
             "origin": origin or "whole",
             "panels_json": panels_json or "",
+            "authors_norm": authors_norm or "",
             "_cap_l": (caption or "").lower(),
             "_title_l": (title or "").lower(),
             "_fig_l": (fig_no or "").lower(),
@@ -708,7 +713,7 @@ class FigureSearcher:
         return emb, meta
 
     _COLS = ("SELECT id, item_key, att_key, title, year, journal, journal_abbr, authors, fig_no, caption, "
-             "context_text, image_path, page_no, embedding, origin, panels_json FROM figures")
+             "context_text, image_path, page_no, embedding, origin, panels_json, authors_norm FROM figures")
 
     def _ensure_cache(self):
         sig = self._signature()
@@ -771,6 +776,15 @@ class FigureSearcher:
         self._sig = sig
         self._dump_cache()
 
+    _author_qcache = {}
+
+    def _author_hit(self, aq, authors_norm):
+        """作者过滤：委托 author_norm.author_match，支持完全词条匹配与全名防降级。"""
+        if not authors_norm:
+            return False
+        from author_norm import author_match
+        return author_match(aq, authors_norm)
+
     def _fts_candidates(self, query):
         """FTS5 OR-recall: return list of figures.id hits (or [] on failure)."""
         terms = re.findall(r"[\w\u4e00-\u9fff]+", query)
@@ -791,9 +805,10 @@ class FigureSearcher:
             return []
 
     def search(self, query, top_k=20, journal_filter=None, year_min=None, year_max=None,
-               item_key=None, fig_no=None, offset=0, origin=None):
+               item_key=None, fig_no=None, offset=0, origin=None,
+               author=None, journal_exact=False):
         query = (query or "").strip()
-        if not query and not (item_key or journal_filter or fig_no or year_min or year_max):
+        if not query and not (item_key or journal_filter or fig_no or year_min or year_max or author):
             return []  # 无词且无过滤 = 空操作(防全库 dump)
 
         self._ensure_cache()
@@ -803,8 +818,10 @@ class FigureSearcher:
         from notes_index import clean_wikilink_alias, make_wikilink
 
         jf = journal_filter.lower() if journal_filter else None
+        jexact = bool(journal_exact)
         ymin = int(year_min) if year_min else None
         ymax = int(year_max) if year_max else None
+        aq = (author or "").strip()  # 作者查询：归一化双向子串（中文↔拼音），见 author_norm
         # KEY- 前缀口径归一（消费端两种写法都要能命中，见 2026-10-18 工单§二.6）
         ik = re.sub(r"^KEY-", "", (item_key or "").strip(), flags=re.IGNORECASE).upper() or None
         fg = fig_no.strip().lower() if fig_no else None
@@ -846,7 +863,14 @@ class FigureSearcher:
             m = self._metas[i]
             if org and (m.get("origin") or "whole") != org:
                 continue
-            if jf and jf not in (m["journal"] or "").lower():
+            if jf:
+                mj = (m["journal"] or "").lower()
+                if jexact:
+                    if jf != mj.strip():
+                        continue
+                elif jf not in mj:
+                    continue
+            if aq and not self._author_hit(aq, m.get("authors_norm") or ""):
                 continue
             if ymin is not None and (m["year"] or 0) < ymin:
                 continue

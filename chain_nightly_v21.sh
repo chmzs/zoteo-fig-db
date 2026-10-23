@@ -8,7 +8,7 @@ echo "[chain] $(date '+%F %T') start"
 
 # 1. 停画廊 + 无条件落 .manual_stop（画廊若本已停，shutdown 不会写标记，
 #    watchdog 5 分钟内会复活读者进程——必须显式盖章）
-curl -s -m 5 "http://127.0.0.1:5173/api/shutdown" && echo "[chain] gallery shutdown ok" || echo "[chain] gallery already down"
+curl -s -m 5 "http://100.64.0.10:5173/api/shutdown" && echo "[chain] gallery shutdown ok" || echo "[chain] gallery already down"
 touch .manual_stop
 echo "[chain] .manual_stop set"
 sleep 3
@@ -108,7 +108,7 @@ for PORT in 5173 23122; do
     echo "[chain] FINAL: port $PORT STILL DEAD — 人工查 batch_tmp/fallback_$PORT.log"
   fi
 done
-curl -s -m 5 http://127.0.0.1:5173/api/stats && echo ""
+curl -s -m 5 http://100.64.0.10:5173/api/stats && echo ""
 
 echo "CHAIN_V21_DONE" > batch_tmp/FINAL_DONE.json
 echo "[chain] $(date '+%F %T') ALL DONE"

@@ -4,7 +4,7 @@ cd /d "D:\Zotero\fig_db"
 
 netstat -ano | findstr ":5173" | findstr "LISTENING" >nul
 if %errorlevel% equ 0 (
-    start http://127.0.0.1:5173
+    start http://100.64.0.10:5173
     exit /b 0
 )
 
