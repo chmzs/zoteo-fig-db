@@ -486,7 +486,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                 : `zotero://select/library/items/${item.item_key}`;
 
             const wikilinkBtn = item.wikilink
-                ? `<button class="btn-action" onclick="copyField(${idx}, 'wikilink', this)" title="复制 Obsidian 双链: ${item.wikilink.replace(/"/g, '')}">
+                ? `<button class="btn-action" onclick="copyField(${idx}, 'wikilink', this, event)" title="复制 Obsidian 双链: ${item.wikilink.replace(/"/g, '')}">
                             <span>🔗 复制笔记双链</span>
                         </button>`
                 : '';
@@ -504,15 +504,15 @@ HTML_CONTENT = """<!DOCTYPE html>
                     <div class="card-title">${item.title}</div>
                     <div class="card-fig-no">${item.fig_no}</div>
                     <div class="card-caption" title="${item.caption}"><strong>题注:</strong> ${item.caption}</div>
-                    <div class="card-actions">
-                        <a class="btn-action btn-pdf" href="${openPdfUrl}" title="在 Zotero 中直接打开 PDF 并滚动到第 ${item.page_no} 页此图">
+                    <div class="card-actions" onclick="event.stopPropagation()">
+                        <a class="btn-action btn-pdf" href="${openPdfUrl}" onclick="openZoteroProtocol(event, '${openPdfUrl}')" title="在 Zotero 中直接打开 PDF 并滚动到第 ${item.page_no} 页此图">
                             <span>📄 打开 PDF 到此图</span>
                         </a>
                         ${wikilinkBtn}
-                        <button class="btn-action" onclick="copyField(${idx}, 'imgembed', this)" title="复制可直接在 Obsidian 渲染的图片链接">
+                        <button class="btn-action" onclick="copyField(${idx}, 'imgembed', this, event)" title="复制可直接在 Obsidian 渲染的图片链接">
                             <span>🖼️ 复制图片嵌入</span>
                         </button>
-                        <button class="btn-action" onclick="copyField(${idx}, 'dshprompt', this)" title="复制用于 DSH 视觉分析的提示词">
+                        <button class="btn-action" onclick="copyField(${idx}, 'dshprompt', this, event)" title="复制用于 DSH 视觉分析的提示词">
                             <span>🤖 问 DSH</span>
                         </button>
                     </div>
@@ -718,26 +718,72 @@ HTML_CONTENT = """<!DOCTYPE html>
             `;
         }
 
-        function copyField(idx, field, btn) {
+        function openZoteroProtocol(e, url) {
+            if (e) {
+                if (e.stopPropagation) e.stopPropagation();
+                if (e.preventDefault) e.preventDefault();
+            }
+            let ifr = document.getElementById('protocolIframe');
+            if (!ifr) {
+                ifr = document.createElement('iframe');
+                ifr.id = 'protocolIframe';
+                ifr.style.display = 'none';
+                document.body.appendChild(ifr);
+            }
+            ifr.src = url;
+        }
+
+        function copyToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text);
+            }
+            return new Promise((resolve, reject) => {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    ta.style.top = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    const successful = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    if (successful) resolve();
+                    else reject(new Error('execCommand failed'));
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        }
+
+        function copyField(idx, field, btn, e) {
+            if (e && e.stopPropagation) e.stopPropagation();
             const item = currentResults[idx];
             if (!item) return;
             let text = '';
             if (field === 'wikilink') {
                 text = item.wikilink;
             } else if (field === 'imgembed') {
-                const fname = item.image_path.split(/[\\\\/]/).pop();
+                const fname = item.image_path.split(/[\\/]/).pop();
                 text = `![${item.fig_no}](${window.location.origin}/image/${encodeURIComponent(fname)})`;
             } else if (field === 'dshprompt') {
-                const p = item.image_path.replace(/\\\\/g, '/');
+                const p = item.image_path.replace(/\\/g, '/');
                 text = `请结合地学背景深度解读此图 ${p}: ${item.caption}`;
             }
             if (!text) return;
-            navigator.clipboard.writeText(text).then(() => {
+            copyToClipboard(text).then(() => {
                 if (!btn) return;
                 const orig = btn.innerHTML;
                 btn.innerHTML = '<span>✓ 已复制</span>';
                 btn.style.background = '#16a34a';
                 setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 1200);
+            }).catch(() => {
+                if (!btn) return;
+                const orig = btn.innerHTML;
+                btn.innerHTML = '<span>⚠️ 复制失败</span>';
+                btn.style.background = '#e11d48';
+                setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 1500);
             });
         }
 
