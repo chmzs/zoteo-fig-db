@@ -39,7 +39,7 @@
 
 0a. ✅ 已办（2026-10-19 00:05 lead 代办入库）：`mcp_server.py` 与 `watchdog.py` 双端口改动已审（py_compile 过、无敏感串）并按明确路径 commit，接盘会话无需再做。
 本会话新增且项目三件套（AGENTS/README/HANDOFF）零记载的资产，开工时一并补一段：
-- mcp_server.py（FastMCP，streamable-http 0.0.0.0:23122 /mcp，宿主机 192.168.0.102，远程机 192.168.0.100 直连，图像经 base64 内联绕过文件边界）；
+- mcp_server.py（FastMCP，streamable-http 0.0.0.0:23122 /mcp，恒定 overlay 100.64.0.10 直连，图像经 base64 内联绕过文件边界）；
 - watchdog.py 已扩为双端口看顾（5173 + 23122，.manual_stop 同时停两服务）；
 - 消费端契约在 ~/.agents/skills/zotero-figure/SKILL.md（含读图纪律：视觉判读只取结构信息，数值断言必须文字复核——面板落地后此条仍是最后防线，不要移除）。
 

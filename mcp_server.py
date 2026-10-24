@@ -22,7 +22,7 @@ from mcp.server.fastmcp.utilities.types import Image as MCPImage
 mcp = FastMCP(
     name="zotero-figure",
     instructions="Zotero 地学文献图表语义检索与多模态视觉直读服务。支持按关键词、区域、指标或文献 KEY 检索核心剖面图与年代学曲线，直接返回多模态图像流与图注元数据。",
-    host=os.environ.get("GEO_FIGURE_HOST", "100.64.0.10"),
+    host="0.0.0.0",
     port=23122,
 )
 
@@ -203,11 +203,6 @@ def search_figures(
     panel: str = "",
     panel_pick: str = "",
     crop_mode: str = "native",
-    author: str = "",
-    journal: str = "",
-    journal_exact: bool = False,
-    year_min: int = 0,
-    year_max: int = 0,
 ) -> list:
     """
     检索地学文献图表。支持语义与关键词检索，直接返回图注元数据及图像流。
@@ -224,20 +219,13 @@ def search_figures(
     - panel_pick: 'first' 取该图第一个面板；与 panel 二选一，panel 优先。
     - crop_mode: 'native'（默认，不超过查看端 1280 上限且绝不放大）
                  / 'upscale_to'（补到 max_side，但不超过原生物理分辨率）。
-    - author: 作者过滤（中文/拼音/英文均可，如 '唐丽雅' 或 'Tang'，模糊匹配拼音变体）；
-              与 query 正交叠加：先按作者筛，再按语义排序。
-    - journal: 期刊过滤（默认子串匹配；journal_exact=True 时精确相等）。
-    - year_min / year_max: 年份范围过滤（0 表示不限）。
     """
     s = get_searcher()
     top_k = max(1, min(10, top_k))
     clean_key = item_key.replace("KEY-", "").strip() if item_key else None
     # 面板行独占 1280 预算 → 排序时优先取面板，整图同父则合并展示
     hits = s.search(query=query, item_key=clean_key, top_k=top_k * 4,
-                   origin=None if with_panels else "whole",
-                   author=author or None, journal_filter=journal or None,
-                   journal_exact=journal_exact,
-                   year_min=year_min or None, year_max=year_max or None)
+                   origin=None if with_panels else "whole")
 
     if not hits:
         msg = f"未找到匹配的图表（query='{query}', item_key='{item_key}'）。"
@@ -407,8 +395,8 @@ def main():
     )
     parser.add_argument(
         "--host",
-        default=os.environ.get("GEO_FIGURE_HOST", "100.64.0.10"),
-        help="HTTP 监听地址（默认 100.64.0.10）",
+        default="0.0.0.0",
+        help="HTTP 监听地址（默认 0.0.0.0）",
     )
     args = parser.parse_args()
 

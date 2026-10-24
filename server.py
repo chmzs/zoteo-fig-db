@@ -335,7 +335,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <button class="btn-action" style="flex: none; background: #0284c7; font-weight: 600;" onclick="triggerUpdate()" id="btnUpdate" title="增量扫描 Zotero 最近入库文献并提取图表">
                     <span>🔄 增量更新</span>
                 </button>
-                <button class="btn-action" id="btnShutdown" style="flex: none; background: #475569;" onclick="shutdownServer()" title="安全关停本地图表服务">
+                <button class="btn-action" style="flex: none; background: #475569;" onclick="shutdownServer()" title="安全关停本地图表服务">
                     <span>⏹️ 关闭服务</span>
                 </button>
             </div>
@@ -343,15 +343,6 @@ HTML_CONTENT = """<!DOCTYPE html>
         <div class="search-container">
             <input type="text" id="searchInput" class="search-input" placeholder="输入自然语言或关键词（例如：全新世降水对比 / lake organic carbon / Tibetan Plateau warming）..." autofocus>
             <button class="btn-search" onclick="doSearch()">搜 索</button>
-        </div>
-        <div class="filter-row" style="gap:8px; flex-wrap:wrap;">
-            <input type="text" id="fAuthor" placeholder="作者（中文/拼音/英文，如 唐丽雅 / Tang）" style="flex:1; min-width:180px; padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
-            <select id="fJournal" style="padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px; max-width:260px;">
-                <option value="">全部期刊</option>
-            </select>
-            <input type="number" id="fYearMin" placeholder="年起" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
-            <input type="number" id="fYearMax" placeholder="年止" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
-            <button class="btn-search" style="padding:6px 14px; font-size:13px;" onclick="clearFilters()">清空过滤</button>
         </div>
         <div class="filter-row">
             <span>快捷预设:</span>
@@ -401,43 +392,9 @@ HTML_CONTENT = """<!DOCTYPE html>
             } catch(e) {}
         }
 
-        // ---- 结构化过滤（作者/期刊/年份）：与语义 q 正交叠加，不做开关 ----
-        function filterParams() {
-            const p = [];
-            const a = document.getElementById('fAuthor').value.trim();
-            const j = document.getElementById('fJournal').value;
-            const y1 = document.getElementById('fYearMin').value;
-            const y2 = document.getElementById('fYearMax').value;
-            if (a) p.push('author=' + encodeURIComponent(a));
-            if (j) p.push('journal=' + encodeURIComponent(j) + '&journal_exact=1');
-            if (y1) p.push('year_min=' + y1);
-            if (y2) p.push('year_max=' + y2);
-            return p.length ? '&' + p.join('&') : '';
-        }
-        function clearFilters() {
-            document.getElementById('fAuthor').value = '';
-            document.getElementById('fJournal').value = '';
-            document.getElementById('fYearMin').value = '';
-            document.getElementById('fYearMax').value = '';
-            doSearch();
-        }
-        async function loadJournalOptions() {
-            try {
-                const res = await fetch('/api/facets');
-                const data = await res.json();
-                const sel = document.getElementById('fJournal');
-                (data.journals || []).forEach(([j, n]) => {
-                    const o = document.createElement('option');
-                    o.value = j; o.textContent = j + ' (' + n + ')';
-                    sel.appendChild(o);
-                });
-            } catch(e) {}
-        }
-
         async function doSearch() {
             const q = document.getElementById('searchInput').value.trim();
-            const fp = filterParams();
-            if (!q && !fp) return;
+            if (!q) return;
 
             lastQuery = q;
             const gallery = document.getElementById('gallery');
@@ -445,7 +402,7 @@ HTML_CONTENT = """<!DOCTYPE html>
 
             fetchTopK = 100;
             try {
-                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&top_k=${fetchTopK}${fp}`);
+                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&top_k=${fetchTopK}`);
                 const data = await res.json();
                 currentResults = data;
                 renderGallery(data);
@@ -486,7 +443,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                 : `zotero://select/library/items/${item.item_key}`;
 
             const wikilinkBtn = item.wikilink
-                ? `<button class="btn-action" onclick="copyField(${idx}, 'wikilink', this, event)" title="复制 Obsidian 双链: ${item.wikilink.replace(/"/g, '')}">
+                ? `<button class="btn-action" onclick="copyField(${idx}, 'wikilink', this)" title="复制 Obsidian 双链: ${item.wikilink.replace(/"/g, '')}">
                             <span>🔗 复制笔记双链</span>
                         </button>`
                 : '';
@@ -504,15 +461,15 @@ HTML_CONTENT = """<!DOCTYPE html>
                     <div class="card-title">${item.title}</div>
                     <div class="card-fig-no">${item.fig_no}</div>
                     <div class="card-caption" title="${item.caption}"><strong>题注:</strong> ${item.caption}</div>
-                    <div class="card-actions" onclick="event.stopPropagation()">
-                        <a class="btn-action btn-pdf" href="${openPdfUrl}" onclick="openZoteroProtocol(event, '${openPdfUrl}')" title="在 Zotero 中直接打开 PDF 并滚动到第 ${item.page_no} 页此图">
+                    <div class="card-actions">
+                        <a class="btn-action btn-pdf" href="${openPdfUrl}" title="在 Zotero 中直接打开 PDF 并滚动到第 ${item.page_no} 页此图">
                             <span>📄 打开 PDF 到此图</span>
                         </a>
                         ${wikilinkBtn}
-                        <button class="btn-action" onclick="copyField(${idx}, 'imgembed', this, event)" title="复制可直接在 Obsidian 渲染的图片链接">
+                        <button class="btn-action" onclick="copyField(${idx}, 'imgembed', this)" title="复制可直接在 Obsidian 渲染的图片链接">
                             <span>🖼️ 复制图片嵌入</span>
                         </button>
-                        <button class="btn-action" onclick="copyField(${idx}, 'dshprompt', this, event)" title="复制用于 DSH 视觉分析的提示词">
+                        <button class="btn-action" onclick="copyField(${idx}, 'dshprompt', this)" title="复制用于 DSH 视觉分析的提示词">
                             <span>🤖 问 DSH</span>
                         </button>
                     </div>
@@ -527,7 +484,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             if (!next.length && currentResults.length >= fetchTopK && fetchTopK < 500) {
                 fetchTopK += 100;
                 try {
-                    const rr = await fetch(`/api/search?q=${encodeURIComponent(lastQuery)}&top_k=${fetchTopK}${filterParams()}`);
+                    const rr = await fetch(`/api/search?q=${encodeURIComponent(lastQuery)}&top_k=${fetchTopK}`);
                     currentResults = await rr.json();
                 } catch(e) {}
                 next = currentResults.slice(loadedCount, loadedCount + BATCH);
@@ -707,87 +664,42 @@ HTML_CONTENT = """<!DOCTYPE html>
 
         async function shutdownServer() {
             if (!confirm('确定要关停本地 zoteo-fig-db 图库服务吗？关停后网页将无法访问。')) return;
-            const btn = document.getElementById('btnShutdown');
-            if (btn) btn.innerHTML = '<span>⏳ 正在停止...</span>';
             try {
                 await fetch('/api/shutdown', { method: 'POST' });
             } catch (e) {}
-            // 尝试同时停止远端关联进程（如果有），并替换当前页面展示
             document.body.innerHTML = `
                 <div style="display: flex; height: 80vh; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-family: sans-serif;">
                     <h2 style="color: #f8fafc; margin-bottom: 12px;">服务已成功停止</h2>
-                    <p>后台服务已关停，写入 .manual_stop 防自启标记。如需重新使用，在开始菜单启动「zoteo-fig-db」即可。</p>
+                    <p>如需重新使用，在开始菜单启动「zoteo-fig-db」即可。</p>
                 </div>
             `;
         }
-            }
-            let ifr = document.getElementById('protocolIframe');
-            if (!ifr) {
-                ifr = document.createElement('iframe');
-                ifr.id = 'protocolIframe';
-                ifr.style.display = 'none';
-                document.body.appendChild(ifr);
-            }
-            ifr.src = url;
-        }
 
-        function copyToClipboard(text) {
-            if (navigator.clipboard && window.isSecureContext) {
-                return navigator.clipboard.writeText(text);
-            }
-            return new Promise((resolve, reject) => {
-                try {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.position = 'fixed';
-                    ta.style.left = '-9999px';
-                    ta.style.top = '-9999px';
-                    document.body.appendChild(ta);
-                    ta.focus();
-                    ta.select();
-                    const successful = document.execCommand('copy');
-                    document.body.removeChild(ta);
-                    if (successful) resolve();
-                    else reject(new Error('execCommand failed'));
-                } catch (err) {
-                    reject(err);
-                }
-            });
-        }
-
-        function copyField(idx, field, btn, e) {
-            if (e && e.stopPropagation) e.stopPropagation();
+        function copyField(idx, field, btn) {
             const item = currentResults[idx];
             if (!item) return;
             let text = '';
             if (field === 'wikilink') {
                 text = item.wikilink;
             } else if (field === 'imgembed') {
-                const fname = item.image_path.split(/[\\/]/).pop();
+                const fname = item.image_path.split(/[\\\\/]/).pop();
                 text = `![${item.fig_no}](${window.location.origin}/image/${encodeURIComponent(fname)})`;
             } else if (field === 'dshprompt') {
-                const p = item.image_path.replace(/\\/g, '/');
+                const p = item.image_path.replace(/\\\\/g, '/');
                 text = `请结合地学背景深度解读此图 ${p}: ${item.caption}`;
             }
             if (!text) return;
-            copyToClipboard(text).then(() => {
+            navigator.clipboard.writeText(text).then(() => {
                 if (!btn) return;
                 const orig = btn.innerHTML;
                 btn.innerHTML = '<span>✓ 已复制</span>';
                 btn.style.background = '#16a34a';
                 setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 1200);
-            }).catch(() => {
-                if (!btn) return;
-                const orig = btn.innerHTML;
-                btn.innerHTML = '<span>⚠️ 复制失败</span>';
-                btn.style.background = '#e11d48';
-                setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 1500);
             });
         }
 
         // 初始不加载任何图片：避免打开网页就拉全库；等用户输入或点快捷预设
         loadStats();
-        loadJournalOptions();
         document.getElementById('gallery').innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 60px 0;">输入关键词或点击上方快捷预设，开始语义检索图表</div>';
     </script>
     <div style="text-align:center;color:#64748b;font-size:11px;padding:10px 0 16px;" id="addrbar"></div>
@@ -853,8 +765,6 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             year_max = query.get("year_max", [None])[0]
             item_key = query.get("item_key", [None])[0]
             fig_no = query.get("fig_no", [None])[0]
-            author = query.get("author", [None])[0]
-            journal_exact = query.get("journal_exact", ["0"])[0] in ("1", "true", "yes")
             offset = int(query.get("offset", ["0"])[0] or 0)
             # 画廊默认只出整图行（工单§二.2：默认视图不变）；panels=1 才透传面板行
             origin = None if query.get("panels", ["0"])[0] in ("1", "true", "yes") else "whole"
@@ -869,8 +779,6 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 fig_no=fig_no,
                 offset=offset,
                 origin=origin,
-                author=author,
-                journal_exact=journal_exact,
             )
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -967,9 +875,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             kw = dict(journal_filter=body.get("journal"), year_min=body.get("year_min"),
                       year_max=body.get("year_max"), item_key=body.get("item_key"),
                       fig_no=body.get("fig_no"), offset=int(body.get("offset", 0) or 0),
-                      origin=None if str(body.get("panels", "0")).lower() in ("1", "true", "yes") else "whole",
-                      author=body.get("author"),
-                      journal_exact=str(body.get("journal_exact", "0")).lower() in ("1", "true", "yes"))
+                      origin=None if str(body.get("panels", "0")).lower() in ("1", "true", "yes") else "whole")
             out = [searcher.search(x, top_k=top_k, **kw) for x in qlist]
             payload = out[0] if single else {"results": out}
             self.send_response(200)
@@ -1024,19 +930,9 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             
-            # Asynchronously shutdown the server and companion mcp server
+            # Asynchronously shutdown the server
             def killer():
                 time.sleep(0.5)
-                # 联动停掉 23122 MCP 读者进程
-                try:
-                    import subprocess
-                    r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
-                    for line in r.stdout.splitlines():
-                        if ":23122" in line and "LISTENING" in line:
-                            pid = line.strip().split()[-1]
-                            subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
-                except Exception:
-                    pass
                 os._exit(0)
             import threading
             threading.Thread(target=killer).start()
@@ -1063,10 +959,9 @@ def reachable_urls():
 
 
 def run():
-    bind_host = os.environ.get("GEO_FIGURE_HOST", "100.64.0.10")
-    server_address = (bind_host, PORT)
+    server_address = ("0.0.0.0", PORT)
     httpd = ThreadingHTTPServer(server_address, ZoteoFigHandler)
-    print(f"zoteo-fig-db running at http://{bind_host}:{PORT}")
+    print(f"zoteo-fig-db running at http://0.0.0.0:{PORT}")
     for u in reachable_urls():
         print(f"  reachable: {u}")
 
@@ -1076,7 +971,7 @@ def run():
             time.sleep(0.3)
             try:
                 import webbrowser
-                webbrowser.open(f"http://{bind_host}:{PORT}")
+                webbrowser.open(f"http://127.0.0.1:{PORT}")
             except Exception:
                 pass
         import threading
@@ -1102,14 +997,13 @@ def run():
 
 
 if __name__ == "__main__":
-    bind_host = os.environ.get("GEO_FIGURE_HOST", "100.64.0.10")
     import socket
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        in_use = (s.connect_ex((bind_host, PORT)) == 0)
+        in_use = (s.connect_ex(("127.0.0.1", PORT)) == 0)
 
     if in_use:
         import webbrowser
-        webbrowser.open(f"http://{bind_host}:{PORT}")
+        webbrowser.open(f"http://127.0.0.1:{PORT}")
         sys.exit(0)
 
     run()

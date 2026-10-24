@@ -19,14 +19,11 @@ MCP_SERVER = os.path.join(BASE_DIR, "mcp_server.py")
 
 
 def port_alive(port=5173):
-    host = os.environ.get("GEO_FIGURE_HOST", "100.64.0.10")
-    for h in (host, "127.0.0.1"):
-        try:
-            with socket.create_connection((h, port), timeout=1.5):
-                return True
-        except OSError:
-            pass
-    return False
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1.5):
+            return True
+    except OSError:
+        return False
 
 
 def main():
