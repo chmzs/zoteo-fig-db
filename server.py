@@ -335,7 +335,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <button class="btn-action" style="flex: none; background: #0284c7; font-weight: 600;" onclick="triggerUpdate()" id="btnUpdate" title="增量扫描 Zotero 最近入库文献并提取图表">
                     <span>🔄 增量更新</span>
                 </button>
-                <button class="btn-action" style="flex: none; background: #475569;" onclick="shutdownServer()" title="安全关停本地图表服务">
+                <button class="btn-action" id="btnShutdown" style="flex: none; background: #475569;" onclick="shutdownServer()" title="安全关停本地图表服务">
                     <span>⏹️ 关闭服务</span>
                 </button>
             </div>
@@ -707,21 +707,19 @@ HTML_CONTENT = """<!DOCTYPE html>
 
         async function shutdownServer() {
             if (!confirm('确定要关停本地 zoteo-fig-db 图库服务吗？关停后网页将无法访问。')) return;
+            const btn = document.getElementById('btnShutdown');
+            if (btn) btn.innerHTML = '<span>⏳ 正在停止...</span>';
             try {
                 await fetch('/api/shutdown', { method: 'POST' });
             } catch (e) {}
+            // 尝试同时停止远端关联进程（如果有），并替换当前页面展示
             document.body.innerHTML = `
                 <div style="display: flex; height: 80vh; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-family: sans-serif;">
                     <h2 style="color: #f8fafc; margin-bottom: 12px;">服务已成功停止</h2>
-                    <p>如需重新使用，在开始菜单启动「zoteo-fig-db」即可。</p>
+                    <p>后台服务已关停，写入 .manual_stop 防自启标记。如需重新使用，在开始菜单启动「zoteo-fig-db」即可。</p>
                 </div>
             `;
         }
-
-        function openZoteroProtocol(e, url) {
-            if (e) {
-                if (e.stopPropagation) e.stopPropagation();
-                if (e.preventDefault) e.preventDefault();
             }
             let ifr = document.getElementById('protocolIframe');
             if (!ifr) {
@@ -1026,9 +1024,19 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             
-            # Asynchronously shutdown the server
+            # Asynchronously shutdown the server and companion mcp server
             def killer():
                 time.sleep(0.5)
+                # 联动停掉 23122 MCP 读者进程
+                try:
+                    import subprocess
+                    r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
+                    for line in r.stdout.splitlines():
+                        if ":23122" in line and "LISTENING" in line:
+                            pid = line.strip().split()[-1]
+                            subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
+                except Exception:
+                    pass
                 os._exit(0)
             import threading
             threading.Thread(target=killer).start()
