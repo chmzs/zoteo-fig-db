@@ -819,11 +819,6 @@ HTML_CONTENT = """<!DOCTYPE html>
 
 
 class ZoteoFigHandler(BaseHTTPRequestHandler):
-    # Windows 下 SO_REUSEADDR 允许两个进程同时绑同一端口（连接被随机分配，
-    # 双缓存双行为，2026-10-28 实测出现 5173 双监听）。关掉后重复启动直接
-    # 报 10048，端口占用由看门狗/启动脚本判活，绝不再起第二个实例。
-    allow_reuse_address = False
-
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1145,10 +1140,23 @@ def reachable_urls():
     return urls
 
 
+class SingleInstanceHTTPServer(ThreadingHTTPServer):
+    """禁用 SO_REUSEADDR 的画廊服务器。
+
+    allow_reuse_address 是 TCPServer/HTTPServer 的类属性，设在 handler 上无效
+    （2026-10-28 首次修就把属性放错了位置，实测仍能双绑）。
+    Windows 下 SO_REUSEADDR 会让两个进程同时绑同一端口（连接随机分流、双缓存
+    双行为，实测 5173 出现双监听）。关掉后重复启动直接抛 10048，
+    由看门狗/启动脚本的端口判活决定是否拉起，绝不再产生第二个实例。
+    """
+
+    allow_reuse_address = False
+
+
 def run():
     bind_host = os.environ.get("GEO_FIGURE_HOST", "0.0.0.0")
     server_address = (bind_host, PORT)
-    httpd = ThreadingHTTPServer(server_address, ZoteoFigHandler)
+    httpd = SingleInstanceHTTPServer(server_address, ZoteoFigHandler)
     print(f"zoteo-fig-db running at http://{bind_host}:{PORT}")
     for u in reachable_urls():
         print(f"  reachable: {u}")
