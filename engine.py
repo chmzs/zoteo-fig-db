@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 
 import fitz  # PyMuPDF
@@ -26,6 +27,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(BASE_DIR, "models", "multilingual-e5-small")
 DB_PATH = os.path.join(BASE_DIR, "zotero-figures.sqlite")
 IMAGE_DIR = os.path.join(BASE_DIR, "cache", "figures")
+# 检索缓存构建锁：warm_caches 线程与 HTTP 请求线程会并发进入 _ensure_cache，
+# 无锁时 _metas 与 _M 可能失同步（2026-10-28 审计实测 15949 vs 15948）
+_CACHE_LOCK = threading.Lock()
 CURRENT_EXTRACTOR_VERSION = "2.1"   # 全局版本戳（figures.extractor_version 唯一来源）；2.1=面板级切分
 WEBP_QUALITY = 72
 MAX_FULL_SIDE = 1600
@@ -716,13 +720,28 @@ class FigureSearcher:
              "context_text, image_path, page_no, embedding, origin, panels_json, authors_norm FROM figures")
 
     def _ensure_cache(self):
+        # 并发保护：warm_caches 线程与请求线程可能同时进入，缺少锁会双重追加
+        # 导致 _metas 比 _M 多行 → search 里 sims[i] 越界（2026-10-28 审计实测）
+        with _CACHE_LOCK:
+            self._ensure_cache_locked()
+
+    def _ensure_cache_locked(self):
         sig = self._signature()
+
+        # 一致性自愈：内存行数必须与矩阵行数一致，否则强制全量重建
+        if self._M is not None and len(self._metas) != int(self._M.shape[0]):
+            print(f"[cache] desync detected: metas={len(self._metas)} "
+                  f"matrix={int(self._M.shape[0])} -> full rebuild", flush=True)
+            self._M, self._metas, self._id2idx, self._sig = None, None, None, None
+
         if self._M is not None and self._sig == sig:
             return
 
         # 冷启动：优先 mmap 磁盘缓存（重启后零重建）
         if self._M is None and self._try_load_disk_cache(sig):
-            return
+            if len(self._metas) == int(self._M.shape[0]):
+                return
+            self._M, self._metas, self._id2idx, self._sig = None, None, None, None
 
         # 快速路径：纯增量追加（count 增量 == max_id 增量，无删除/无 REPLACE 空洞）
         if (self._M is not None and len(self._metas) > 0
@@ -734,15 +753,23 @@ class FigureSearcher:
             rows = cur.fetchall()
             conn.close()
             if rows:
-                new_mats = []
+                # 先全部解析到本地，成功后再一次性提交：中途异常不会留下半截状态
+                base = len(self._metas)
+                new_mats, new_metas = [], []
                 for r in rows:
                     emb, meta = self._load_row(r)
                     if not meta.get("journal_abbr"):
                         meta["journal_abbr"] = journal_abbr_str(meta.get("journal", ""))
                     new_mats.append(emb)
-                    self._id2idx[meta["id"]] = len(self._metas)
-                    self._metas.append(meta)
-                self._M = np.vstack([np.asarray(self._M), np.stack(new_mats)])
+                    meta["_row"] = base + len(new_metas)
+                    new_metas.append(meta)
+                merged = np.vstack([np.asarray(self._M), np.stack(new_mats)])
+                if int(merged.shape[0]) != base + len(new_metas):
+                    raise RuntimeError("incremental append produced inconsistent rows")
+                self._M = merged
+                for m in new_metas:
+                    self._id2idx[m["id"]] = m["_row"]
+                    self._metas.append(m)
             self._sig = sig
             self._dump_cache()
             return
@@ -819,8 +846,16 @@ class FigureSearcher:
 
         jf = journal_filter.lower() if journal_filter else None
         jexact = bool(journal_exact)
-        ymin = int(year_min) if year_min else None
-        ymax = int(year_max) if year_max else None
+
+        # 年份容错：非法值视为不限（2026-10-28 审计：int("abc") 曾抛异常断开连接）
+        def _int_or_none(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        ymin = _int_or_none(year_min) if year_min else None
+        ymax = _int_or_none(year_max) if year_max else None
         aq = (author or "").strip()  # 作者查询：归一化双向子串（中文↔拼音），见 author_norm
         # KEY- 前缀口径归一（消费端两种写法都要能命中，见 2026-10-18 工单§二.6）
         ik = re.sub(r"^KEY-", "", (item_key or "").strip(), flags=re.IGNORECASE).upper() or None
@@ -841,7 +876,9 @@ class FigureSearcher:
         elif query:
             q_emb = self.encoder.encode_query(query)
             sims = self._M @ q_emb
-            pool = int(max(200, (top_k + offset) * 10))
+            # pool 夹到 n：offset 极大时 (top_k+offset)*10 超过 n，
+            # 会让 np.argpartition 的 kth 越界抛 ValueError（2026-10-28 审计发现）
+            pool = min(n, int(max(200, (top_k + offset) * 10)))
             if n <= pool:
                 cand_idx = list(range(n))
             else:
@@ -881,6 +918,9 @@ class FigureSearcher:
             if fg and fg not in m["_fig_l"]:
                 continue
 
+            # 防御：索引越界说明缓存失同步（正常路径已被 _ensure_cache 的一致性自愈拦住）
+            if sims is not None and i >= len(sims):
+                continue
             sim = float(sims[i]) if sims is not None else 0.0
             bonus = 0.0
             if query and q_lower in m["_cap_l"]:

@@ -393,12 +393,22 @@ HTML_CONTENT = """<!DOCTYPE html>
         let fetchTopK = 100;   // 随滚动逐轮加深: 100 -> 500
         let io = null;
 
-        async function loadStats() {
-            try {
-                const res = await fetch('/api/stats');
-                const data = await res.json();
-                document.getElementById('statsBadge').innerText = `已收录 ${data.total_figures} 张图表 (${data.total_papers} 篇文献)`;
-            } catch(e) {}
+        async function loadStats(retries = 6) {
+            // 失败重试：服务刚起时可能仍在加载向量矩阵，旧实现静默失败会让
+            // 徽标永久停在 “已收录 -- 张图表”（2026-10-28 用户截图实测）
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const res = await fetch('/api/stats');
+                    const data = await res.json();
+                    if (typeof data.total_figures === 'number') {
+                        document.getElementById('statsBadge').innerText =
+                            `已收录 ${data.total_figures} 张图表 (${data.total_papers} 篇文献)`;
+                        return;
+                    }
+                } catch (e) {}
+                await new Promise(r => setTimeout(r, 700));
+            }
+            document.getElementById('statsBadge').innerText = '统计加载失败（服务可能仍在启动）';
         }
 
         // ---- 结构化过滤（作者/期刊/年份）：与语义 q 正交叠加，不做开关 ----
@@ -793,7 +803,7 @@ HTML_CONTENT = """<!DOCTYPE html>
     <div style="text-align:center;color:#64748b;font-size:11px;padding:10px 0 16px;" id="addrbar"></div>
     <script>
         fetch('/api/urls').then(r => r.json()).then(d => {
-            document.getElementById('addrbar').textContent = '访问地址：' + d.urls.join('　·　') + '　（换网络后 IP 会变，overlay 地址恒定）';
+            document.getElementById('addrbar').textContent = '访问地址：' + d.urls.join('　·　') + '　（本机用 127.0.0.1，跨设备用 overlay 恒定地址）';
         }).catch(() => {});
     </script>
     <div id="backTop" title="回到顶部" style="position:fixed;right:18px;bottom:18px;z-index:900;display:none;width:42px;height:42px;border-radius:50%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;cursor:pointer;font-size:18px;line-height:42px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.45);user-select:none;">↑</div>
@@ -815,6 +825,46 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        """全局兜底：未捕获异常一律回 500，绝不让请求线程静默断开（2026-10-28 审计发现）。"""
+        try:
+            self._do_GET()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            self._send_error_json(500, type(e).__name__, str(e))
+
+    def _send_error_json(self, code, kind, message):
+        try:
+            body = json.dumps({"error": kind, "message": (message or "")[:300]},
+                              ensure_ascii=False).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _int_param(query, name, default, lo=None, hi=None):
+        """安全整数参数：非法值回落默认值并夹取到 [lo, hi]，不再让 int() 抛断连接。"""
+        raw = (query.get(name, [None])[0] or "").strip()
+        if raw == "":
+            val = default
+        else:
+            try:
+                val = int(raw)
+            except (TypeError, ValueError):
+                val = default
+        # val 可能因 default=None 而保持 None，此时不参与夹取比较（None<int 会抛 TypeError）
+        if val is not None:
+            if lo is not None and val < lo:
+                val = lo
+            if hi is not None and val > hi:
+                val = hi
+        return val
+
+    def _do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
@@ -847,15 +897,16 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 searcher = FigureSearcher()
 
             q = query.get("q", [""])[0]
-            top_k = max(1, min(500, int(query.get("top_k", [20])[0])))
+            top_k = self._int_param(query, "top_k", 20, 1, 500)
             journal = query.get("journal", [None])[0]
-            year_min = query.get("year_min", [None])[0]
-            year_max = query.get("year_max", [None])[0]
+            # 年份非法值直接丢弃（不再传字符串给引擎的 int() 抛异常）
+            year_min = self._int_param(query, "year_min", None, 1800, 2200)
+            year_max = self._int_param(query, "year_max", None, 1800, 2200)
             item_key = query.get("item_key", [None])[0]
             fig_no = query.get("fig_no", [None])[0]
             author = query.get("author", [None])[0]
             journal_exact = query.get("journal_exact", ["0"])[0] in ("1", "true", "yes")
-            offset = int(query.get("offset", ["0"])[0] or 0)
+            offset = self._int_param(query, "offset", 0, 0, 100000)
             # 画廊默认只出整图行（工单§二.2：默认视图不变）；panels=1 才透传面板行
             origin = None if query.get("panels", ["0"])[0] in ("1", "true", "yes") else "whole"
 
@@ -935,6 +986,15 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        """全局兜底：未捕获异常一律回 500（与 do_GET 同策略）。"""
+        try:
+            self._do_POST()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            self._send_error_json(500, type(e).__name__, str(e))
+
+    def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
@@ -1027,14 +1087,20 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             # Asynchronously shutdown the server and companion mcp server
             def killer():
                 time.sleep(0.5)
-                # 联动停掉 23122 MCP 读者进程
+                # 联动停掉 23122 MCP 读者进程。
+                # 注意：中文 Windows 下 netstat 输出是 GBK，text=True 默认按 UTF-8 解码会
+                # 抛 UnicodeDecodeError 并被静默吞掉 → MCP 永不退出（2026-10-28 审计实测）。
                 try:
                     import subprocess
-                    r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
-                    for line in r.stdout.splitlines():
+
+                    r = subprocess.run(["netstat", "-ano"], capture_output=True,
+                                       encoding="utf-8", errors="replace")
+                    for line in (r.stdout or "").splitlines():
                         if ":23122" in line and "LISTENING" in line:
                             pid = line.strip().split()[-1]
-                            subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
+                            if pid.isdigit():
+                                subprocess.run(["taskkill", "/PID", pid, "/F"],
+                                               capture_output=True)
                 except Exception:
                     pass
                 os._exit(0)
@@ -1050,13 +1116,25 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
 
 
 def reachable_urls():
-    """本机全部可访问地址：回环 + 各网卡 IPv4（含 WLAN 与 xedTun 等 overlay）。"""
+    """稳定访问地址：本机回环 + overlay 恒定地址（100.64.0.0/10 段）。
+
+    刻意不列出 WLAN 动态地址（192.168.*）：它随换网络/路由器重启漂移，
+    且所有配置、快捷方式、MCP 端点均只依赖回环与 overlay（2026-10-28 收敛）。
+    """
     urls = [f"http://127.0.0.1:{PORT}"]
     try:
+        import ipaddress
         import socket
+
+        overlay = ipaddress.ip_network("100.64.0.0/10")
         for ip in sorted(set(socket.gethostbyname_ex(socket.gethostname())[2])):
-            if not ip.startswith("127.") and ip != "0.0.0.0":
-                urls.append(f"http://{ip}:{PORT}")
+            if ip.startswith("127.") or ip == "0.0.0.0":
+                continue
+            try:
+                if ipaddress.ip_address(ip) in overlay:
+                    urls.append(f"http://{ip}:{PORT}")
+            except ValueError:
+                continue
     except Exception:
         pass
     return urls
