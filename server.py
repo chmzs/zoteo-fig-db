@@ -730,7 +730,10 @@ HTML_CONTENT = """<!DOCTYPE html>
                 </div>
             `;
         }
-            }
+
+        function openZoteroProtocol(e, url) {
+            e.preventDefault();
+            e.stopPropagation();
             let ifr = document.getElementById('protocolIframe');
             if (!ifr) {
                 ifr = document.createElement('iframe');
@@ -773,10 +776,10 @@ HTML_CONTENT = """<!DOCTYPE html>
             if (field === 'wikilink') {
                 text = item.wikilink;
             } else if (field === 'imgembed') {
-                const fname = item.image_path.split(/[\\/]/).pop();
+                const fname = item.image_path.split(/[\\\\/]/).pop();
                 text = `![${item.fig_no}](${window.location.origin}/image/${encodeURIComponent(fname)})`;
             } else if (field === 'dshprompt') {
-                const p = item.image_path.replace(/\\/g, '/');
+                const p = item.image_path.replace(/\\\\/g, '/');
                 text = `请结合地学背景深度解读此图 ${p}: ${item.caption}`;
             }
             if (!text) return;
