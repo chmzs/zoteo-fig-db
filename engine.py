@@ -265,6 +265,11 @@ class FigureDB:
         if "authors_norm" not in _cols:
             cursor.execute("ALTER TABLE figures ADD COLUMN authors_norm TEXT DEFAULT '';")
 
+        # 缓存签名 MAX(indexed_at) 必走索引：无索引时全表扫带 384 维 embedding
+        # blob（16k 行 ≈450ms），每次 search 开头都跑 → 检索固定 +0.45s。
+        # 2026-10-29 实测：建索引后签名 448ms→1ms。
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_indexed_at ON figures(indexed_at);")
+
         cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_figures USING fts5(
             fig_no,
