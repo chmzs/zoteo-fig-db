@@ -838,9 +838,14 @@ class FigureSearcher:
 
     def search(self, query, top_k=20, journal_filter=None, year_min=None, year_max=None,
                item_key=None, fig_no=None, offset=0, origin=None,
-               author=None, journal_exact=False):
+               author=None, journal_exact=False,
+               rating_min=None, rating_map=None):
+        """rating_min/rating_map 为个人评分过滤（可选）：rating_map 由
+        ratings.as_lookup() 提供，键 =(item_key 大写, 归一化 fig_no)。两者
+        默认 None 时行为与旧版完全一致，indexer/batch 等调用方不受影响。"""
         query = (query or "").strip()
-        if not query and not (item_key or journal_filter or fig_no or year_min or year_max or author):
+        if not query and not (item_key or journal_filter or fig_no or year_min or year_max
+                              or author or rating_min):
             return []  # 无词且无过滤 = 空操作(防全库 dump)
 
         self._ensure_cache()
@@ -895,6 +900,13 @@ class FigureSearcher:
             sims = None  # 纯过滤列表模式：按入库序输出,不算分
             cand_idx = list(range(n))
 
+        def stars_of(meta):
+            """查该图的个人评分；未评分返回 0。键必须与 ratings.py 的归一化一致。"""
+            if not rating_map:
+                return 0
+            return rating_map.get(((meta["item_key"] or "").strip().upper(),
+                                   re.sub(r"[\s.]", "", meta["_fig_l"])), 0)
+
         q_lower = query.lower()
         scored = []
         seen_cand = set()
@@ -921,6 +933,9 @@ class FigureSearcher:
             if ik and (m["item_key"] or "").upper() != ik:
                 continue
             if fg and fg not in m["_fig_l"]:
+                continue
+            # 个人评分过滤：仅在显式传 rating_min 时生效（默认不影响未评分图）
+            if rating_min is not None and stars_of(m) < rating_min:
                 continue
 
             # 防御：索引越界说明缓存失同步（正常路径已被 _ensure_cache 的一致性自愈拦住）
@@ -969,6 +984,7 @@ class FigureSearcher:
                 "link_kind": link_kind,
                 "score": round(final_score, 4),
                 "semantic_sim": round(sim, 4),
+                "rating": stars_of(m),
             })
             if len(results) >= top_k + max(0, offset):
                 break

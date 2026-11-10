@@ -11,6 +11,9 @@ __pycache__/
 batch_state.json
 FINAL_DONE.json
 .manual_stop
+# 个人评分（人工标注，机器相关，不入库；算法升级也绝不触碰）
+ratings.json
+ratings.json.tmp
 
 *.sqlite-journal
 nul

@@ -54,6 +54,151 @@ def _resolve_pdf(att_key, att_path):
     return None
 
 
+_META_SQL = """
+    SELECT
+        i.key as item_key,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'title') as title,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'date') as date_val,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'publicationTitle') as publication_title,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'journalAbbreviation') as journal_abbr,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'publisher') as publisher,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'bookTitle') as book_title,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'proceedingsTitle') as proceedings_title,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'university') as university,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'abstractNote') as abstract
+    FROM items i
+"""
+
+
+def _resolve_venue(publication_title, journal_abbr, proceedings_title,
+                   book_title, university, publisher):
+    """刊名回退链（indexer 与 backfill_meta 共用，防两处逻辑漂移）。
+
+    期刊论文取 publicationTitle；书籍 / 学位论文 / 会议论文的"刊名"实际存在
+    publisher / university / bookTitle / proceedingsTitle。只查 publicationTitle
+    会让这些条目必然为空（2026-11-10 实测 136 篇）。
+
+    只有真期刊名才采用 Zotero 的 journalAbbreviation；回退来源直接存全称，
+    免得 journal_abbr_str 把 "Science Press" 切成 "S. P." 这类无意义缩写。
+    """
+    primary = (publication_title or "").strip()
+    venue = (primary
+             or (proceedings_title or "").strip()
+             or (book_title or "").strip()
+             or (university or "").strip()
+             or (publisher or "").strip())
+    venue_abbr = (journal_abbr or "").strip() if primary else venue
+    return venue, venue_abbr
+
+
+def _parse_year(date_val):
+    if not date_val:
+        return 0
+    match = re.search(r"\b(19\d\d|20\d\d)\b", str(date_val))
+    return int(match.group(1)) if match else 0
+
+
+def _read_creators(cursor):
+    """作者回退链：书籍/编著取 editor、软件取 programmer。
+
+    只查 'author' 会让这类条目的作者列恒空（2026-11-10 实测 15 篇，其中
+    author 类型的为 0 篇）。按 author > editor > programmer 优先取一组。
+    """
+    cursor.execute("""
+        SELECT i.key, c.firstName, c.lastName, ic.orderIndex, ct.creatorType
+        FROM itemCreators ic
+        JOIN creators c ON ic.creatorID = c.creatorID
+        JOIN creatorTypes ct ON ct.creatorTypeID = ic.creatorTypeID
+        JOIN items i ON ic.itemID = i.itemID
+        WHERE ct.creatorType IN ('author', 'editor', 'programmer')
+        ORDER BY i.key, ic.orderIndex
+    """)
+    by_role = {}
+    for key, first_name, last_name, _oi, role in cursor.fetchall():
+        f = (first_name or "").strip()
+        l = (last_name or "").strip()
+        full = f"{f} {l}".strip() if f else l
+        if full:
+            by_role.setdefault(key, {}).setdefault(role, []).append(full)
+    authors_map = {}
+    for key, roles in by_role.items():
+        authors_map[key] = (roles.get("author") or roles.get("editor")
+                            or roles.get("programmer") or [])
+    return authors_map
+
+
+def get_zotero_meta_map(keys=None):
+    """读 Zotero 条目元数据（不要求有 PDF 附件），供全量回填使用。
+
+    keys 给定时只返回这些 item_key（大写比对）。返回值：
+      {item_key: {title, year, journal, journal_abbr, authors, authors_norm}}
+
+    与扫描模式相反，这里**优先读主库** zotero.sqlite：.bak 是 Zotero 关闭时的
+    快照，用户在应用内补录的年份/作者只存在于主库（2026-11-10 实测 .bak 落后
+    一天，5 篇补录全丢失）。复制失败才退 .bak。
+    """
+    src_db = os.path.join(ZOTERO_DIR, "zotero.sqlite")
+    backup_db = os.path.join(ZOTERO_DIR, "zotero.sqlite.bak")
+    try:
+        shutil.copy2(src_db, TEMP_DB)
+    except OSError:
+        shutil.copy2(backup_db, TEMP_DB)
+    conn = sqlite3.connect(TEMP_DB)
+    cursor = conn.cursor()
+    cursor.execute(_META_SQL)
+    rows = cursor.fetchall()
+    authors_map = _read_creators(cursor)
+    conn.close()
+    try:
+        os.remove(TEMP_DB)
+    except Exception:
+        pass
+
+    wanted = {k.upper() for k in keys} if keys else None
+    meta_map = {}
+    for (item_key, title, date_val, publication_title, journal_abbr,
+         publisher, book_title, proceedings_title, university, _abstract) in rows:
+        if wanted is not None and item_key.upper() not in wanted:
+            continue
+        primary = (publication_title or "").strip()
+        venue, _unused = _resolve_venue(
+            publication_title, journal_abbr, proceedings_title,
+            book_title, university, publisher)
+        creators = authors_map.get(item_key, [])
+        meta_map[item_key] = {
+            "title": title or "",
+            "year": _parse_year(date_val),
+            "journal": venue,
+            "journal_abbr_raw": (journal_abbr or "").strip() if primary else "",
+            "from_primary_venue": bool(primary),
+            "authors": _display_authors(creators[0] if creators else ""),
+            "authors_norm": build_authors_norm(creators),
+        }
+
+    # 缩写美化必须与 indexer 同一条路径：按刊名分组挑一个通过合理性校验的
+    # Zotero 缩写，再 resolve_abbr 统一格式化。直接写 Zotero 原始值会把
+    # "Ecol. Monogr." 退化回 "ECOL MONOGR"（2026-11-10 dry-run 实测 5322 行）。
+    groups = {}
+    for meta in meta_map.values():
+        norm_key = re.sub(r"[^a-z0-9&]", "", (meta["journal"] or "").lower())
+        groups.setdefault(norm_key, []).append(meta)
+    for group in groups.values():
+        consensus = ""
+        for meta in group:
+            raw = meta["journal_abbr_raw"]
+            if raw and zot_abbr_plausible(meta["journal"], raw):
+                consensus = raw
+                break
+        for meta in group:
+            # 回退来源（出版社/授予单位/书名）直接存全称，避免被切成 "S. P."
+            meta["journal_abbr"] = (resolve_abbr(meta["journal"], consensus)
+                                    if meta["from_primary_venue"] else meta["journal"])
+    for meta in meta_map.values():
+        meta.pop("journal_abbr_raw", None)
+        meta.pop("from_primary_venue", None)
+    return meta_map
+
+
 def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
     src_db = os.path.join(ZOTERO_DIR, "zotero.sqlite.bak")
     if not os.path.exists(src_db):
@@ -73,6 +218,9 @@ def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
         (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'publicationTitle') as journal,
         (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'journalAbbreviation') as journal_abbr,
         (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'publisher') as publisher,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'bookTitle') as book_title,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'proceedingsTitle') as proceedings_title,
+        (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'university') as university,
         (SELECT value FROM itemDataValues v JOIN itemData d ON d.valueID = v.valueID JOIN fields f ON f.fieldID = d.fieldID WHERE d.itemID = i.itemID AND f.fieldName = 'abstractNote') as abstract
     FROM itemAttachments ia
     JOIN items att_i ON ia.itemID = att_i.itemID
@@ -86,23 +234,7 @@ def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
     cursor.execute(query)
     rows = cursor.fetchall()
 
-    # 作者映射：key -> ["First Last" 全名，按 orderIndex 排序]
-    cursor.execute("""
-        SELECT i.key, c.firstName, c.lastName, ic.orderIndex
-        FROM itemCreators ic
-        JOIN creators c ON ic.creatorID = c.creatorID
-        JOIN creatorTypes ct ON ct.creatorTypeID = ic.creatorTypeID
-        JOIN items i ON ic.itemID = i.itemID
-        WHERE ct.creatorType = 'author'
-        ORDER BY i.key, ic.orderIndex
-    """)
-    authors_map = {}
-    for key, first_name, last_name, _oi in cursor.fetchall():
-        f = (first_name or "").strip()
-        l = (last_name or "").strip()
-        full = f"{f} {l}".strip() if f else l
-        if full:
-            authors_map.setdefault(key, []).append(full)
+    authors_map = _read_creators(cursor)
     conn.close()
     try:
         os.remove(TEMP_DB)
@@ -113,14 +245,18 @@ def get_zotero_items_with_pdfs(limit=50, filter_journal=None):
     by_item = {}
     order = []
     for r in rows:
-        item_key, att_key, att_path, title, date_val, journal, journal_abbr, publisher, abstract = r
+        (item_key, att_key, att_path, title, date_val, publication_title, journal_abbr,
+         publisher, book_title, proceedings_title, university, abstract) = r
         if item_key not in by_item:
+            venue, venue_abbr = _resolve_venue(
+                publication_title, journal_abbr, proceedings_title,
+                book_title, university, publisher)
             by_item[item_key] = {
                 "item_key": item_key,
                 "title": title or "",
                 "date_val": date_val,
-                "journal": journal or "",
-                "journal_abbr": (journal_abbr or "").strip(),
+                "journal": venue,
+                "journal_abbr": venue_abbr,
                 "publisher": (publisher or "").strip(),
                 "abstract": (abstract or "").strip(),
                 "attachments": [],

@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 from engine import IMAGE_DIR, FigureDB, FigureSearcher
+import ratings
 
 PORT = int(os.environ.get("GEO_FIGURE_PORT", 5173))
 searcher = None
@@ -186,6 +187,10 @@ HTML_CONTENT = """<!DOCTYPE html>
             border-radius: 4px;
             font-weight: 500;
         }
+        /* 期刊名斜体（卡片用简称、模态框用全称，两处同一口径） */
+        .venue {
+            font-style: italic;
+        }
         .sim-score {
             color: var(--accent);
             font-weight: 600;
@@ -195,11 +200,6 @@ HTML_CONTENT = """<!DOCTYPE html>
             font-weight: 600;
             color: var(--text-primary);
             line-height: 1.3;
-        }
-        .card-fig-no {
-            font-size: 13px;
-            font-weight: 700;
-            color: var(--accent);
         }
         .card-caption {
             font-size: 12px;
@@ -213,6 +213,45 @@ HTML_CONTENT = """<!DOCTYPE html>
             padding: 6px 8px;
             border-radius: 6px;
             border-left: 3px solid var(--accent);
+        }
+        .card-fig-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .card-fig-no {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--accent);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .card-stars {
+            display: flex;
+            align-items: center;
+            gap: 1px;
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .card-stars .star {
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1;
+            color: #475569;
+            transition: color 0.15s, transform 0.1s;
+        }
+        .card-stars .star:hover {
+            transform: scale(1.18);
+        }
+        .card-stars .star.on {
+            color: #fbbf24;
+        }
+        .card-stars .star-label {
+            margin-left: 4px;
+            font-size: 10px;
+            color: #64748b;
         }
         .card-actions {
             margin-top: auto;
@@ -305,6 +344,18 @@ HTML_CONTENT = """<!DOCTYPE html>
             border-top: 1px solid var(--card-border);
             padding-top: 8px;
         }
+        .modal-head {
+            display: flex;
+            align-items: baseline;
+            gap: 18px;
+            margin-bottom: 4px;
+            flex-wrap: wrap;
+        }
+        .modal-head .modal-meta {
+            color: #7dd3fc;
+            font-weight: 700;
+            font-size: 12.5px;
+        }
         #toast {
             position: fixed;
             bottom: 26px;
@@ -351,6 +402,14 @@ HTML_CONTENT = """<!DOCTYPE html>
             </select>
             <input type="number" id="fYearMin" placeholder="年起" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
             <input type="number" id="fYearMax" placeholder="年止" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+            <select id="fStar" onchange="doSearch()" style="padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+                <option value="">全部评分</option>
+                <option value="5">★★★ 仅 5 星</option>
+                <option value="4">★≥4</option>
+                <option value="3">★≥3</option>
+                <option value="2">★≥2</option>
+                <option value="1">★≥1（只看已评分）</option>
+            </select>
             <button class="btn-search" style="padding:6px 14px; font-size:13px;" onclick="clearFilters()">清空过滤</button>
         </div>
         <div class="filter-row">
@@ -376,8 +435,11 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <img id="modalImg" src="" alt="Figure">
             </div>
             <div class="modal-details">
-                <div style="font-weight: bold; color: var(--accent);" id="modalFigNo"></div>
-                <div style="color: #fff; margin-bottom: 4px;" id="modalTitle"></div>
+                <div class="modal-head">
+                    <span id="modalFigNo" style="font-weight: bold; color: var(--accent);"></span>
+                    <span id="modalMeta" class="modal-meta"></span>
+                </div>
+                <div style="color: #fff; margin-bottom: 6px;" id="modalTitle"></div>
                 <div id="modalCaption"></div>
             </div>
         </div>
@@ -422,6 +484,8 @@ HTML_CONTENT = """<!DOCTYPE html>
             if (j) p.push('journal=' + encodeURIComponent(j) + '&journal_exact=1');
             if (y1) p.push('year_min=' + y1);
             if (y2) p.push('year_max=' + y2);
+            const st = document.getElementById('fStar').value;
+            if (st) p.push('star_min=' + st);
             return p.length ? '&' + p.join('&') : '';
         }
         function clearFilters() {
@@ -429,7 +493,38 @@ HTML_CONTENT = """<!DOCTYPE html>
             document.getElementById('fJournal').value = '';
             document.getElementById('fYearMin').value = '';
             document.getElementById('fYearMax').value = '';
+            document.getElementById('fStar').value = '';
             doSearch();
+        }
+        async function setStar(idx, n, e) {
+            if (e && e.stopPropagation) e.stopPropagation();
+            const item = currentResults[idx];
+            if (!item) return;
+            // 点已点亮的同一颗星 = 清除评分
+            const next = (item.rating === n) ? 0 : n;
+            try {
+                const res = await fetch('/api/rate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({item_key: item.item_key, fig_no: item.fig_no, stars: next}),
+                });
+                const data = await res.json();
+                if (data.status !== 'ok') throw new Error(data.message || '评分写入失败');
+                item.rating = data.stars;
+                refreshStars(idx);
+            } catch (err) {
+                console.error('setStar failed:', err);
+            }
+        }
+        function refreshStars(idx) {
+            const item = currentResults[idx];
+            const box = document.querySelector('.card-stars[data-idx="' + idx + '"]');
+            if (!item || !box) return;
+            box.querySelectorAll('.star').forEach((el, k) => {
+                el.classList.toggle('on', (item.rating || 0) >= k + 1);
+            });
+            const label = box.querySelector('.star-label');
+            if (label) label.textContent = item.rating ? item.rating + ' 星' : '';
         }
         async function loadJournalOptions() {
             try {
@@ -508,11 +603,17 @@ HTML_CONTENT = """<!DOCTYPE html>
                 </div>
                 <div class="card-body">
                     <div class="card-meta">
-                        <span class="journal-badge">${(item.authors ? item.authors + ' · ' : '')}${(item.journal_abbr || item.journal || 'Journal')} (${item.year || 'N/A'}) · P.${item.page_no}</span>
+                        <span class="journal-badge">${(item.authors ? item.authors + ' · ' : '')}<em class="venue">${(item.journal_abbr || item.journal || 'Journal')}</em> (${item.year || 'N/A'}) · P.${item.page_no}</span>
                         <span class="sim-score">相关度: ${(item.score * 100).toFixed(0)}%</span>
                     </div>
                     <div class="card-title">${item.title}</div>
-                    <div class="card-fig-no">${item.fig_no}</div>
+                    <div class="card-fig-row">
+                        <span class="card-fig-no">${item.fig_no}</span>
+                        <span class="card-stars" data-idx="${idx}" onclick="event.stopPropagation()">
+                            ${[1, 2, 3, 4, 5].map(n => `<span class="star${(item.rating || 0) >= n ? ' on' : ''}" onclick="setStar(${idx}, ${n}, event)" title="${n} 星（再点同一星清除）">★</span>`).join('')}
+                            <span class="star-label">${item.rating ? item.rating + ' 星' : ''}</span>
+                        </span>
+                    </div>
                     <div class="card-caption" title="${item.caption}"><strong>题注:</strong> ${item.caption}</div>
                     <div class="card-actions" onclick="event.stopPropagation()">
                         <a class="btn-action btn-pdf" href="${openPdfUrl}" onclick="openZoteroProtocol(event, '${openPdfUrl}')" title="在 Zotero 中直接打开 PDF 并滚动到第 ${item.page_no} 页此图">
@@ -574,7 +675,18 @@ HTML_CONTENT = """<!DOCTYPE html>
             const fname = item.image_path.split(/[\\\\/]/).pop();
             document.getElementById('modalImg').src = `/image/${encodeURIComponent(fname)}`;
             document.getElementById('modalFigNo').innerText = `${item.fig_no} (PDF 第 ${item.page_no} 页)`;
-            document.getElementById('modalTitle').innerText = `${item.title} (${item.journal || ''} ${item.year || ''})`;
+            // 元数据合并一行：作者 · 期刊全称（斜体）· 年份
+            // 模态框横向空间充足，期刊优先全称；卡片窄栏仍用 journal_abbr
+            // 期刊名走 <em>，故此处用 innerHTML：authors/venue 必须转义
+            const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+                (ch) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+            const metaBits = [];
+            if (item.authors) metaBits.push(esc(item.authors));
+            const venueFull = item.journal || item.journal_abbr || '';
+            if (venueFull) metaBits.push('<em class="venue">' + esc(venueFull) + '</em>');
+            if (item.year) metaBits.push(esc(String(item.year)));
+            document.getElementById('modalMeta').innerHTML = metaBits.join(' · ');
+            document.getElementById('modalTitle').innerText = item.title;
             document.getElementById('modalCaption').innerText = item.caption;
             document.getElementById('imageModal').classList.add('active');
         }
@@ -912,6 +1024,8 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             offset = self._int_param(query, "offset", 0, 0, 100000)
             # 画廊默认只出整图行（工单§二.2：默认视图不变）；panels=1 才透传面板行
             origin = None if query.get("panels", ["0"])[0] in ("1", "true", "yes") else "whole"
+            # 个人评分过滤：只在明确传参时生效，未传 = 不按评分筛（默认视图不变）
+            star_min = self._int_param(query, "star_min", None, 1, 5)
 
             results = searcher.search(
                 query=q,
@@ -925,6 +1039,8 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 origin=origin,
                 author=author,
                 journal_exact=journal_exact,
+                rating_min=star_min,
+                rating_map=ratings.as_lookup(),  # 始终传：结果要带 rating 供前端渲染已点亮星
             )
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1027,18 +1143,53 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             if searcher is None:
                 searcher = FigureSearcher()
             top_k = max(1, min(500, int(body.get("top_k", 20))))
+            star_min = body.get("star_min")
+            try:
+                star_min = int(star_min) if star_min not in (None, "") else None
+            except (TypeError, ValueError):
+                star_min = None
+            if star_min is not None:
+                star_min = max(1, min(5, star_min))
             kw = dict(journal_filter=body.get("journal"), year_min=body.get("year_min"),
                       year_max=body.get("year_max"), item_key=body.get("item_key"),
                       fig_no=body.get("fig_no"), offset=int(body.get("offset", 0) or 0),
                       origin=None if str(body.get("panels", "0")).lower() in ("1", "true", "yes") else "whole",
                       author=body.get("author"),
-                      journal_exact=str(body.get("journal_exact", "0")).lower() in ("1", "true", "yes"))
+                      journal_exact=str(body.get("journal_exact", "0")).lower() in ("1", "true", "yes"),
+                      rating_min=star_min, rating_map=ratings.as_lookup())
             out = [searcher.search(x, top_k=top_k, **kw) for x in qlist]
             payload = out[0] if single else {"results": out}
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if path == "/api/rate":
+            # 个人评分写入：独立 sidecar（ratings.json），不碰 figures 表
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            except Exception:
+                body = None
+            try:
+                if not isinstance(body, dict):
+                    raise ValueError("JSON body required")
+                stars = ratings.set_rating(body.get("item_key"), body.get("fig_no"),
+                                           body.get("stars"))
+            except (ValueError, TypeError) as exc:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": str(exc)},
+                                            ensure_ascii=False).encode("utf-8"))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok", "stars": stars,
+                                         "summary": ratings.summarize()},
+                                        ensure_ascii=False).encode("utf-8"))
             return
 
         if path == "/api/update":
