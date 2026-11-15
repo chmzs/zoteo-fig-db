@@ -336,7 +336,7 @@ def _finalise_abbr(results):
             r.pop("journal_abbr_raw", None)
 
 
-def index_papers(papers, force_reindex=False):
+def index_papers(papers, force_reindex=False, on_progress=None):
     extractor = FigureExtractor()
     encoder = Encoder()
     db = FigureDB()
@@ -345,6 +345,12 @@ def index_papers(papers, force_reindex=False):
     print(f"Starting indexing of {len(papers)} papers...")
 
     for idx, p in enumerate(papers):
+        if on_progress is not None:
+            # 进度回调：/api/jobs/* 用它拿真实 done/total（不是批次号），用于前端进度条
+            try:
+                on_progress(idx, len(papers), p)
+            except Exception:
+                pass
         item_key = p["item_key"]
         att_key = p.get("att_key", "")
         if not force_reindex and db.exists_item(item_key):
@@ -370,6 +376,12 @@ def index_papers(papers, force_reindex=False):
             total_extracted += 1
 
         print(f"[{idx+1}/{len(papers)}] {item_key} ({p['journal']}) -> {len(figs)} figs")
+
+    if on_progress is not None:
+        try:
+            on_progress(len(papers), len(papers), papers[-1] if papers else {})
+        except Exception:
+            pass
 
     stats = db.get_stats()
     print("\nIndexing complete!")
