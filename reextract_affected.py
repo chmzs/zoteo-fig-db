@@ -8,6 +8,7 @@
 
 判据（任一命中即重抽）：
   A. 该篇任一张图所在页面 rotation != 0（旋转页裁偏）
+  C. 该篇任一条题注是续行（"Fig. N continued."）——真题注在前页，需回填
   B. 该篇任一条题注是"正文句式"（编号后无句点、紧跟 shows/presents/plots 等）
      —— 这类题注会把正文段落当图体。
 注：试过"竖长条（高>1.6×宽）"判据，抽查两张均为合法竖图（5 面板柱状图、三阶段概念图），
@@ -31,6 +32,9 @@ import re
 
 import fitz
 from PIL import Image
+
+CONTINUED_STYLE = re.compile(
+    r"^(?:Fig(?:ure)?\.?)\s*\d+[a-z]?\s*[.:]?\s*\(?\s*continued\s*\)?\.?$", re.I)
 
 BODY_STYLE = re.compile(
     r"^(?:Fig(?:ure)?\.?)\s*\d+[a-z]?\s+"
@@ -105,10 +109,11 @@ def main():
             (item_key,)).fetchall()
         pages = [r[0] for r in rows if r[0]]
         body_style = sum(1 for r in rows if BODY_STYLE.match(r[2]))
+        continued = sum(1 for r in rows if CONTINUED_STYLE.match((r[2] or "").strip()))
         pdfs = glob.glob(os.path.join("D:/Zotero/storage", att_key or "", "*.pdf"))
         rotated = has_rotated_page(pdfs[0], pages) if pdfs else False
 
-        if not (rotated or body_style):
+        if not (rotated or body_style or continued):
             continue
 
         affected += 1
@@ -130,7 +135,8 @@ def main():
             db.insert_figure(fig)
         after_strips = sum(1 for f in figs if BODY_STYLE.match(f.get("caption") or ""))
         missing = sum(1 for f in figs if not os.path.exists(f["image_path"]))
-        flag = ("旋转" if rotated else "") + ("+正文题注" if body_style else "")
+        flag = (("旋转" if rotated else "") + ("+正文题注" if body_style else "")
+                + ("+续行题注" if continued else ""))
         print(f"  {item_key:10s} {flag:2s} rows {before_rows}->{len(figs)}  "
               f"正文题注 {before_strips}->{after_strips}  missing={missing}  {str(journal)[:30]}", flush=True)
 

@@ -7,10 +7,12 @@ Notes Map: item_key -> Obsidian Zotero 笔记双链 (确定性扫描)
 
 import json
 import os
+
+import config as app_config
 import re
 import time
 
-NOTES_DIR = r"D:\Users\chmzs\Documents\PaperBell\01_输入\Zotero笔记"
+NOTES_DIR = app_config.notes_dir()   # 配置页设定；留空则该功能静默跳过
 CACHE_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", "notes_map.json")
 
 KEY_RE = re.compile(r"KEY-([A-Z0-9]{8})\.md$")

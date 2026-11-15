@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>zoteo-fig-db · 配置</title>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+    <div class="header-top">
+        <div class="title-group"><h1>🌍 zoteo-fig-db <span style="font-size:14px;color:#94a3b8;font-weight:400;">配置</span></h1></div>
+        <a class="btn-action" style="flex:none;background:#475569;text-decoration:none;" href="/">← 回图库</a>
+    </div>
+    <p style="color:#94a3b8;font-size:13px;">取值优先级：环境变量 &gt; <code>config.json</code> &gt; 自动检测。改完保存需重启服务生效。</p>
+</header>
+
+<main style="max-width:1400px;margin:0 auto;">
+    <div class="card" style="padding:18px;display:flex;flex-direction:column;gap:14px;">
+        <div>
+            <label style="font-size:13px;color:#cbd5e1;">Zotero 数据目录（含 zotero.sqlite）</label>
+            <div style="display:flex;gap:8px;margin-top:6px;">
+                <input id="zotero_dir" class="preset-input preset-input-wide" style="flex:1;">
+                <button class="btn-search preset-btn" onclick="detect()">自动检测</button>
+            </div>
+            <div class="cfg-hint" id="hint_zotero_dir"></div>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#cbd5e1;">Zotero 附件目录（PDF 所在，通常 data 下的 storage）</label>
+            <div style="display:flex;gap:8px;margin-top:6px;">
+                <input id="storage_dir" class="preset-input preset-input-wide" style="flex:1;">
+            </div>
+            <div class="cfg-hint" id="hint_storage_dir"></div>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#cbd5e1;">Obsidian 笔记目录（可选，用于生成双链；留空则跳过）</label>
+            <div style="display:flex;gap:8px;margin-top:6px;">
+                <input id="notes_dir" class="preset-input preset-input-wide" style="flex:1;">
+            </div>
+            <div class="cfg-hint" id="hint_notes_dir"></div>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#cbd5e1;">服务端口</label>
+            <div style="display:flex;gap:8px;margin-top:6px;">
+                <input id="port" type="number" min="1024" max="65535" class="preset-input" style="width:140px;">
+            </div>
+            <div class="cfg-hint" id="hint_port"></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:6px;">
+            <button class="btn-search preset-btn" onclick="save()">保存</button>
+            <button class="btn-search preset-btn preset-btn-muted" onclick="load()">重新读取</button>
+            <span id="status" style="font-size:13px;color:#94a3b8;"></span>
+        </div>
+        <pre id="probe" style="white-space:pre-wrap;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;font-size:12px;color:#7dd3fc;margin:0;">检测中…</pre>
+    </div>
+</main>
+
+<script>
+const FIELDS = ['zotero_dir', 'storage_dir', 'notes_dir', 'port'];
+
+function hint(field, text, bad) {
+    const el = document.getElementById('hint_' + field);
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.color = bad ? '#fca5a5' : '#94a3b8';
+    el.style.fontSize = '12px';
+}
+
+function render(data) {
+    FIELDS.forEach((f) => {
+        const el = document.getElementById(f);
+        if (el) el.value = data.current?.[f] ?? '';
+        hint(f, data.sources?.[f] ? '来源：' + data.sources[f] : '');
+    });
+    const probe = data.probe || {};
+    const lines = [];
+    lines.push('zotero.sqlite：' + (probe.sqlite_ok ? '可读' : '不可读'));
+    if (probe.item_count != null) lines.push('Zotero 条目数：' + probe.item_count);
+    if (probe.storage_ok != null) lines.push('附件目录：' + (probe.storage_ok ? '存在（' + probe.storage_entries + ' 个条目目录）' : '不存在'));
+    if (probe.notes_ok != null) lines.push('笔记目录：' + (probe.notes_ok ? '存在（' + probe.notes_files + ' 个 md）' : '未配置或不存在'));
+    lines.push('当前图库：' + (probe.figures ?? '—') + ' 图 / ' + (probe.papers ?? '—') + ' 篇');
+    document.getElementById('probe').textContent = lines.join('\n');
+}
+
+async function load() {
+    const res = await fetch('/api/config');
+    render(await res.json());
+}
+
+async function detect() {
+    const res = await fetch('/api/config?detect=1');
+    const data = await res.json();
+    if (data.detected) {
+        document.getElementById('zotero_dir').value = data.detected.zotero_dir || '';
+        document.getElementById('storage_dir').value = data.detected.storage_dir || '';
+        hint('zotero_dir', '自动检测来源：' + (data.detected.source || '—'));
+    }
+    render(data);
+}
+
+async function save() {
+    const payload = {};
+    FIELDS.forEach((f) => { payload[f] = document.getElementById(f).value.trim(); });
+    const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    FIELDS.forEach((f) => hint(f, data.errors?.[f] || '', Boolean(data.errors?.[f])));
+    document.getElementById('status').textContent = data.status === 'ok'
+        ? '已保存到 config.json，重启服务后生效'
+        : '保存失败：' + JSON.stringify(data.errors || data.message || '');
+    if (data.status === 'ok') render(await (await fetch('/api/config')).json());
+}
+
+load();
+</script>
+</body>
+</html>

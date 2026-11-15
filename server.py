@@ -7,6 +7,7 @@ Fully compatible with Python 3.10 - 3.15+.
 import email.utils
 import json
 import os
+import sqlite3
 import sys
 import threading
 import time
@@ -18,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 from engine import IMAGE_DIR, FigureDB, FigureSearcher
+import config as app_config
 import presets
 import ratings
 
@@ -95,7 +97,7 @@ def _run_index_job(job_id, limit, force):
                     finished_at=time.time())
 
 
-PORT = int(os.environ.get("GEO_FIGURE_PORT", 5173))
+PORT = int(os.environ.get("GEO_FIGURE_PORT", str(app_config.port())))
 searcher = None
 db = FigureDB()
 
@@ -147,6 +149,42 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if send_body:
             self.wfile.write(body)
+
+    @staticmethod
+    def _config_probe(values):
+        """配置页连通性探测：路径可读性、Zotero 条目数、笔记文件数、当前图库规模。"""
+        probe = {}
+        zotero_dir = values.get("zotero_dir") or ""
+        sqlite_path = os.path.join(zotero_dir, "zotero.sqlite")
+        probe["sqlite_ok"] = os.path.isfile(sqlite_path)
+        if probe["sqlite_ok"]:
+            try:
+                conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True, timeout=5)
+                probe["item_count"] = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+                conn.close()
+            except Exception:
+                probe["item_count"] = None
+        storage_dir = values.get("storage_dir") or ""
+        probe["storage_ok"] = os.path.isdir(storage_dir)
+        if probe["storage_ok"]:
+            try:
+                probe["storage_entries"] = len(os.listdir(storage_dir))
+            except OSError:
+                probe["storage_entries"] = None
+        notes_dir = values.get("notes_dir") or ""
+        probe["notes_ok"] = bool(notes_dir) and os.path.isdir(notes_dir)
+        if probe["notes_ok"]:
+            try:
+                probe["notes_files"] = sum(1 for n in os.listdir(notes_dir) if n.endswith(".md"))
+            except OSError:
+                probe["notes_files"] = None
+        try:
+            stats = db.get_stats()
+            probe["figures"] = stats.get("total_figures")
+            probe["papers"] = stats.get("total_papers")
+        except Exception:
+            pass
+        return probe
 
     def _serve_image(self, path, send_body=True):
         """图片/缩略图：ETag + Last-Modified + 304。
@@ -340,6 +378,24 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                                         ensure_ascii=False).encode("utf-8"))
             return
 
+        elif path == "/config":
+            self._serve_static("config.html")
+            return
+
+        elif path == "/api/config":
+            payload = app_config.load()
+            if query.get("detect", ["0"])[0] in ("1", "true", "yes"):
+                detected_dir, detected_source = app_config.detect_zotero_dir()
+                payload["detected"] = {
+                    "zotero_dir": detected_dir,
+                    "storage_dir": os.path.join(detected_dir, "storage"),
+                    "source": detected_source,
+                }
+            payload["probe"] = self._config_probe(payload)
+            payload["current"] = {k: payload[k] for k in ("zotero_dir", "storage_dir", "notes_dir", "port")}
+            self._send_json(200, payload)
+            return
+
         elif path == "/api/presets":
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -505,6 +561,22 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"status": "ok", "stars": stars,
                                          "summary": ratings.summarize()},
                                         ensure_ascii=False).encode("utf-8"))
+            return
+
+        if path == "/api/config":
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            except (TypeError, ValueError):
+                body = None
+            if not isinstance(body, dict):
+                self._send_json(400, {"status": "error", "message": "JSON body required"})
+                return
+            cleaned, errors = app_config.save(body)
+            if errors:
+                self._send_json(400, {"status": "error", "errors": errors})
+                return
+            self._send_json(200, {"status": "ok", "saved": cleaned})
             return
 
         if path == "/api/jobs/index":

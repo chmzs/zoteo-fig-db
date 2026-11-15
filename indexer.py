@@ -14,6 +14,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import config as app_config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
@@ -27,8 +28,8 @@ from engine import (
     zot_abbr_plausible,
 )
 
-ZOTERO_DIR = r"D:\Zotero"
-STORAGE_DIR = os.path.join(ZOTERO_DIR, "storage")
+ZOTERO_DIR = app_config.zotero_dir()   # 配置页/环境变量/自动检测，见 config.py
+STORAGE_DIR = app_config.storage_dir()
 TEMP_DB = os.path.join(tempfile.gettempdir(), f"zotero_fig_index_{os.getpid()}.sqlite")
 
 # 排除的 PDF（双语对照版 / 明显补充材料）
