@@ -677,7 +677,8 @@ class FigureExtractor:
                                 page_drawings=page_drawings, parent_caption=cap["caption"], raster=raster)
                             for pl in panels:
                                 p_fig_no = f"{cap['fig_no']}{pl['letter']}"
-                                p_name = f"{item_key}_{re.sub(r'[^\w\d]', '_', p_fig_no)}_p{page_idx + 1}.webp"
+                                p_clean = re.sub(r"[^\w\d]", "_", p_fig_no)   # 反斜杠不能出现在 f-string 表达式里（<3.12 语法错）
+                                p_name = f"{item_key}_{p_clean}_p{page_idx + 1}.webp"
                                 p_path = os.path.join(self.output_dir, p_name)
                                 if not self._save_panel(doc, page, pl, valid_images, decode_cache, p_path):
                                     continue
