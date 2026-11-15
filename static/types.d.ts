@@ -18,6 +18,10 @@ interface SearchItem {
     page_no: number;
     origin: 'whole' | 'panel';
     panels_json: string;
+    /** Zotero 网址字段（空串表示没有） */
+    url: string;
+    /** obsidian://open 链接（空串表示库里没有对应笔记） */
+    obsidian_uri: string;
     wikilink: string;
     link_kind: string;
     /** 语义相似度 + 关键词加分，可 > 1（页面展示只用 semantic_sim） */

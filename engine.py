@@ -8,6 +8,7 @@ Zotero GeoFigure Engine (fig_db)
 - granite-embedding-97m-r2 INT8 Embedding & SQLite FTS5 Hybrid Search
 """
 
+import gzip
 import io
 import json
 import os
@@ -738,7 +739,8 @@ class FigureSearcher:
         self._id2idx = None       # figures.id -> row index
         self._sig = None          # cache signature
         self._cache_npy = os.path.join(BASE_DIR, "cache", "embed_matrix.npy")
-        self._cache_pkl = os.path.join(BASE_DIR, "cache", "embed_meta.pkl")
+        # gzip 存：元数据里 title/caption 与 DB 重复，pickle 后 80MB；压缩后 ~20MB
+        self._cache_pkl = os.path.join(BASE_DIR, "cache", "embed_meta.pkl.gz")
 
     def _dump_cache(self):
         """落盘：npy 供 mmap 快速重载，pkl 存签名与元数据"""
@@ -746,7 +748,7 @@ class FigureSearcher:
             import pickle
             if self._M is not None and len(self._M):
                 np.save(self._cache_npy, np.ascontiguousarray(self._M))
-                with open(self._cache_pkl, "wb") as f:
+                with gzip.open(self._cache_pkl, "wb", compresslevel=6) as f:
                     pickle.dump({"sig": self._sig, "metas": self._metas}, f, protocol=4)
         except Exception:
             pass
@@ -756,7 +758,7 @@ class FigureSearcher:
             import pickle
             if not (os.path.exists(self._cache_npy) and os.path.exists(self._cache_pkl)):
                 return False
-            with open(self._cache_pkl, "rb") as f:
+            with gzip.open(self._cache_pkl, "rb") as f:
                 blob = pickle.load(f)
             if blob.get("sig") != sig:
                 return False

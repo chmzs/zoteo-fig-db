@@ -40,6 +40,15 @@ def read_zotero_urls():
     import tempfile
 
     tmpdir = tempfile.mkdtemp(prefix="zfb-urls-")
+    try:
+        return _read_snapshot(src, tmpdir)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)   # 异常路径也必须清，否则每次泄漏 ~400MB
+
+
+def _read_snapshot(src, tmpdir):
+    import shutil
+
     snap = os.path.join(tmpdir, "zotero.sqlite")
     shutil.copy2(src, snap)
     for suffix in ("-wal", "-shm"):
