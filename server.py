@@ -236,6 +236,34 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         except OSError:
             pass
 
+    ACCESS_LOG_ENABLED = os.environ.get("GEO_ACCESS_LOG", "1") != "0"
+
+    def _send_json(self, code, payload):
+        """统一的 JSON 响应：Content-Type/Length/end_headers 一处写死，避免新端点漏 header。"""
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_request(self, code="-", size="-"):
+        """访问日志（cache/access.log，每请求一行）。
+
+        原先 log_message 是 pass——正常请求零痕迹，排障只能靠用户截图
+        （2026-11-15 服务空窗就是靠 curl 探端口才定位）。GEO_ACCESS_LOG=0 可关。
+        """
+        if not self.ACCESS_LOG_ENABLED:
+            return
+        try:
+            with open(os.path.join(BASE_DIR, "cache", "access.log"), "a",
+                      encoding="utf-8") as log_file:
+                log_file.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
+                               f"{self.command} {self.path} {code} {size} "
+                               f"{self.client_address[0]}\n")
+        except OSError:
+            pass
+
     def _send_error_json(self, code, kind, message):
         # 服务端由 watchdog 以 DEVNULL 启动，stdout/stderr 全丢；异常必须自己落盘才能事后追溯
         try:
@@ -291,10 +319,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/stats":
             stats = db.get_stats()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(json.dumps(stats, ensure_ascii=False).encode("utf-8"))
+            self._send_json(200, stats)
             return
 
         elif path == "/api/jobs/latest":
@@ -324,10 +349,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             return
 
         elif path == "/api/urls":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(json.dumps({"urls": reachable_urls()}, ensure_ascii=False).encode("utf-8"))
+            self._send_json(200, {"urls": reachable_urls()})
             return
 
         elif path == "/api/search":
@@ -362,32 +384,12 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 rating_min=star_min,
                 rating_map=ratings.as_lookup(),  # 始终传：结果要带 rating 供前端渲染已点亮星
             )
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(json.dumps(results, ensure_ascii=False).encode("utf-8"))
+            self._send_json(200, results)
             return
 
         elif path == "/api/facets":
-            from collections import Counter
-            from family_rules import journal_family
-            metas = get_searcher()._metas
-            jc = Counter((m.get("journal") or "").strip() for m in metas)
-            jc.pop("", None)
-            fams = Counter()
-            for j, n in jc.items():
-                fams[journal_family(j) or "other"] += n
-            years = sorted({m["year"] for m in metas if m.get("year")})
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "total_figures": len(metas),
-                "total_papers": len({m["item_key"] for m in metas}),
-                "year_range": [years[0], years[-1]] if years else None,
-                "families": dict(fams.most_common()),
-                "journals": [[j, n] for j, n in jc.most_common(80)],
-            }, ensure_ascii=False).encode("utf-8"))
+            # 统计改由 FigureSearcher.facets() 提供：按缓存签名缓存，且不再读私有 _metas
+            self._send_json(200, get_searcher().facets())
             return
 
         elif path.startswith("/image/") or path.startswith("/thumb/"):
@@ -450,10 +452,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                       rating_min=star_min, rating_map=ratings.as_lookup())
             out = [get_searcher().search(x, top_k=top_k, **kw) for x in qlist]
             payload = out[0] if single else {"results": out}
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            self._send_json(200, payload)
             return
 
         if path == "/api/presets":
@@ -567,10 +566,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 after_stats = db.get_stats()
                 new_figs = after_stats["total_figures"] - before_stats["total_figures"]
                 
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": "ok", "new_figures": new_figs}, ensure_ascii=False).encode("utf-8"))
+                self._send_json(200, {"status": "ok", "new_figures": new_figs})
             except Exception as e:
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -579,10 +575,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             return
 
         elif path == "/api/shutdown":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "message": "Server shutting down..."}, ensure_ascii=False).encode("utf-8"))
+            self._send_json(200, {"status": "ok", "message": "Server shutting down..."})
             # 写入手动停止标记：看门狗 5 分钟检查时将尊重该标记不再自动拉起
             try:
                 open(os.path.join(BASE_DIR, ".manual_stop"), "w").close()

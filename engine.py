@@ -15,6 +15,7 @@ import re
 import sqlite3
 import threading
 import time
+from collections import Counter
 
 import fitz  # PyMuPDF
 import numpy as np
@@ -770,6 +771,34 @@ class FigureSearcher:
         sig = cur.fetchone()
         conn.close()
         return sig
+
+    def facets(self):
+        """期刊 / 家族 / 年份分布（按缓存签名缓存）。
+
+        原先 server 直接读 self._metas 并每次请求重建 Counter：绕过封装 + 16k 行白算一遍。
+        """
+        self._ensure_cache()
+        cached = getattr(self, "_facets_cache", None)
+        if cached is not None and cached[0] == self._sig:
+            return cached[1]
+        from family_rules import journal_family
+
+        metas = self._metas
+        journals = Counter((m.get("journal") or "").strip() for m in metas)
+        journals.pop("", None)
+        families = Counter()
+        for journal, count in journals.items():
+            families[journal_family(journal) or "other"] += count
+        years = sorted({m["year"] for m in metas if m.get("year")})
+        payload = {
+            "total_figures": len(metas),
+            "total_papers": len({m["item_key"] for m in metas}),
+            "year_range": [years[0], years[-1]] if years else None,
+            "families": dict(families.most_common()),
+            "journals": [[j, n] for j, n in journals.most_common(80)],
+        }
+        self._facets_cache = (self._sig, payload)
+        return payload
 
     def _load_row(self, r):
         (r_id, item_key, att_key, title, year, journal, journal_abbr, authors, fig_no,
