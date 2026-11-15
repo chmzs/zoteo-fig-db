@@ -4,940 +4,217 @@ Zero-dependency HTTP server based on Python's built-in http.server.
 Fully compatible with Python 3.10 - 3.15+.
 """
 
+import email.utils
 import json
 import os
 import sys
+import threading
 import time
+import traceback
 import urllib.parse
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 from engine import IMAGE_DIR, FigureDB, FigureSearcher
+import presets
 import ratings
+
+# 单例懒加载锁：ThreadingHTTPServer 下首屏并发请求会各建一个 FigureSearcher，
+# 双份 e5 模型常驻内存（2026-11-15 审计）
+_searcher_lock = threading.Lock()
+
+
+def get_searcher():
+    global searcher
+    if searcher is None:
+        with _searcher_lock:
+            if searcher is None:
+                searcher = FigureSearcher()
+    return searcher
+
+
+# ---- 后台索引任务（首次全库 / 增量更新）：进度必须来自真实计数 ----
+_jobs = {}
+_jobs_lock = threading.Lock()
+JOB_STATE_PATH = os.path.join(BASE_DIR, "cache", "job_state.json")
+
+
+def job_snapshot(job_id):
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        return dict(job) if job else None
+
+
+def job_latest():
+    with _jobs_lock:
+        if not _jobs:
+            return None
+        return dict(max(_jobs.values(), key=lambda item: item.get("started_at", 0)))
+
+
+def _job_update(job_id, **fields):
+    with _jobs_lock:
+        job = _jobs.setdefault(job_id, {"id": job_id})
+        job.update(fields)
+        job["updated_at"] = time.time()
+        snapshot = dict(job)
+    try:
+        with open(JOB_STATE_PATH, "w", encoding="utf-8") as state_file:
+            json.dump(snapshot, state_file, ensure_ascii=False)
+    except OSError:
+        pass
+    return snapshot
+
+
+def _run_index_job(job_id, limit, force):
+    from indexer import get_zotero_items_with_pdfs, index_papers
+
+    try:
+        _job_update(job_id, stage="scanning", message="扫描 Zotero 库")
+        papers = get_zotero_items_with_pdfs(limit=limit)
+        total = len(papers)
+        before = db.get_stats()
+        _job_update(job_id, stage="extracting", total=total, done=0,
+                    message=f"准备抽取 {total} 篇")
+
+        def on_progress(done, total_count, paper):
+            _job_update(job_id, done=done, total=total_count,
+                        current=(paper.get("title") or paper.get("item_key") or "")[:70],
+                        current_journal=(paper.get("journal") or "")[:40])
+
+        index_papers(papers, force_reindex=force, on_progress=on_progress)
+        after = db.get_stats()
+        gained = after["total_figures"] - before["total_figures"]
+        _job_update(job_id, stage="done", done=total, total=total,
+                    message=f"完成：图表 {before['total_figures']} → {after['total_figures']}（+{gained}）",
+                    new_figures=gained, finished_at=time.time())
+    except Exception as exc:
+        _job_update(job_id, stage="error", message=f"{type(exc).__name__}: {exc}",
+                    finished_at=time.time())
+
 
 PORT = int(os.environ.get("GEO_FIGURE_PORT", 5173))
 searcher = None
 db = FigureDB()
 
-HTML_CONTENT = """<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>zoteo-fig-db · 地学文献图库</title>
-    <style>
-        :root {
-            --bg-color: #0f172a;
-            --card-bg: #1e293b;
-            --card-border: #334155;
-            --text-primary: #f8fafc;
-            --text-secondary: #94a3b8;
-            --accent: #38bdf8;
-            --accent-hover: #0ea5e9;
-            --tag-bg: #0369a1;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            line-height: 1.5;
-            padding: 20px;
-        }
-        header {
-            max-width: 1400px;
-            margin: 0 auto 24px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-        .header-top {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .title-group h1 {
-            font-size: 24px;
-            color: var(--accent);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .stats-badge {
-            font-size: 13px;
-            color: var(--text-secondary);
-            background: #1e293b;
-            padding: 4px 12px;
-            border-radius: 16px;
-            border: 1px solid var(--card-border);
-        }
-        .search-container {
-            display: flex;
-            gap: 12px;
-            background: var(--card-bg);
-            padding: 10px 16px;
-            border-radius: 12px;
-            border: 1px solid var(--card-border);
-        }
-        .search-input {
-            flex: 1;
-            background: transparent;
-            border: none;
-            color: #fff;
-            font-size: 16px;
-            outline: none;
-        }
-        .search-input::placeholder { color: #64748b; }
-        .btn-search {
-            background: var(--accent);
-            color: #0f172a;
-            border: none;
-            padding: 8px 20px;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        .btn-search:hover { background: var(--accent-hover); }
-        .btn-search[disabled] { opacity: 0.45; cursor: default; }
-        .filter-row {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-            font-size: 13px;
-            color: var(--text-secondary);
-        }
-        .quick-tags {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        .quick-tag {
-            background: #1e293b;
-            border: 1px solid var(--card-border);
-            color: var(--text-secondary);
-            padding: 3px 10px;
-            border-radius: 12px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        .quick-tag:hover { border-color: var(--accent); color: var(--accent); }
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
-        .gallery {
-            max-width: 1400px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-            gap: 22px;
-        }
-        .card {
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            transition: transform 0.2s, border-color 0.2s;
-            content-visibility: auto;
-            contain-intrinsic-size: auto 460px;
-        }
-        .card:hover {
-            transform: translateY(-2px);
-            border-color: var(--accent);
-        }
-        .card-img-wrap {
-            width: 100%;
-            height: 250px;
-            background: #090d16;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            overflow: hidden;
-            border-bottom: 1px solid var(--card-border);
-        }
-        .card-img-wrap img {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            transition: transform 0.3s;
-        }
-        .card-img-wrap:hover img {
-            transform: scale(1.03);
-        }
-        .card-body {
-            padding: 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            flex: 1;
-        }
-        .card-meta {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 12px;
-        }
-        .journal-badge {
-            background: var(--tag-bg);
-            color: #fff;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-weight: 500;
-        }
-        /* 期刊名斜体（卡片用简称、模态框用全称，两处同一口径） */
-        .venue {
-            font-style: italic;
-        }
-        .sim-score {
-            color: var(--accent);
-            font-weight: 600;
-        }
-        .card-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-primary);
-            line-height: 1.3;
-        }
-        .card-caption {
-            font-size: 12px;
-            color: var(--text-secondary);
-            display: -webkit-box;
-            -webkit-line-clamp: 4;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            line-height: 1.45;
-            background: rgba(0,0,0,0.2);
-            padding: 6px 8px;
-            border-radius: 6px;
-            border-left: 3px solid var(--accent);
-        }
-        .card-fig-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-        }
-        .card-fig-no {
-            font-size: 13px;
-            font-weight: 700;
-            color: var(--accent);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .card-stars {
-            display: flex;
-            align-items: center;
-            gap: 1px;
-            user-select: none;
-            flex-shrink: 0;
-        }
-        .card-stars .star {
-            cursor: pointer;
-            font-size: 15px;
-            line-height: 1;
-            color: #475569;
-            transition: color 0.15s, transform 0.1s;
-        }
-        .card-stars .star:hover {
-            transform: scale(1.18);
-        }
-        .card-stars .star.on {
-            color: #fbbf24;
-        }
-        .card-stars .star-label {
-            margin-left: 4px;
-            font-size: 10px;
-            color: #64748b;
-        }
-        .card-actions {
-            margin-top: auto;
-            padding-top: 10px;
-            border-top: 1px solid var(--card-border);
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-        }
-        .btn-action {
-            flex: 1 1 45%;
-            padding: 6px 8px;
-            font-size: 12px;
-            text-align: center;
-            background: #334155;
-            color: #f8fafc;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
-            transition: 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 4px;
-            white-space: nowrap;
-        }
-        .btn-action:hover { background: #475569; }
-        .btn-pdf { background: #be123c; font-weight: 600; }
-        .btn-pdf:hover { background: #e11d48; }
-
-        /* Lightbox modal */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0; top: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.92);
-            backdrop-filter: blur(4px);
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .modal.active { display: flex; }
-        .modal-content {
-            max-width: 92vw;
-            max-height: 92vh;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            padding: 16px;
-            position: relative;
-        }
-        .modal-img-container {
-            flex: 1;
-            min-height: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            position: relative;
-            user-select: none;
-            touch-action: none;
-        }
-        .modal-img-container img {
-            max-width: 100%;
-            max-height: 72vh;
-            object-fit: contain;
-            cursor: zoom-in;
-            transform-origin: center center;
-            will-change: transform;
-        }
-        .modal-close {
-            position: absolute;
-            top: 12px; right: 16px;
-            font-size: 24px;
-            color: #94a3b8;
-            cursor: pointer;
-            background: none; border: none;
-        }
-        .modal-close:hover { color: #fff; }
-        .modal-details {
-            max-height: 140px;
-            overflow-y: auto;
-            font-size: 13px;
-            color: var(--text-secondary);
-            border-top: 1px solid var(--card-border);
-            padding-top: 8px;
-        }
-        .modal-head {
-            display: flex;
-            align-items: baseline;
-            gap: 18px;
-            margin-bottom: 4px;
-            flex-wrap: wrap;
-        }
-        .modal-head .modal-meta {
-            color: #7dd3fc;
-            font-weight: 700;
-            font-size: 12.5px;
-        }
-        #toast {
-            position: fixed;
-            bottom: 26px;
-            right: 26px;
-            background: #0284c7;
-            color: #fff;
-            padding: 10px 18px;
-            border-radius: 8px;
-            font-size: 13px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-            opacity: 0;
-            transform: translateY(8px);
-            transition: opacity 0.25s, transform 0.25s;
-            pointer-events: none;
-            z-index: 2000;
-        }
-        #toast.show { opacity: 1; transform: translateY(0); }
-    </style>
-</head>
-<body>
-    <header>
-        <div class="header-top">
-            <div class="title-group">
-                <h1>🌍 zoteo-fig-db <span style="font-size:14px;color:#94a3b8;font-weight:400;">地学文献图库</span></h1>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <div class="stats-badge" id="statsBadge">已收录 -- 张图表 (-- 篇文献)</div>
-                <button class="btn-action" style="flex: none; background: #0284c7; font-weight: 600;" onclick="triggerUpdate()" id="btnUpdate" title="增量扫描 Zotero 最近入库文献并提取图表">
-                    <span>🔄 增量更新</span>
-                </button>
-                <button class="btn-action" id="btnShutdown" style="flex: none; background: #475569;" onclick="shutdownServer()" title="安全关停本地图表服务">
-                    <span>⏹️ 关闭服务</span>
-                </button>
-            </div>
-        </div>
-        <div class="search-container">
-            <input type="text" id="searchInput" class="search-input" placeholder="输入自然语言或关键词（例如：全新世降水对比 / lake organic carbon / Tibetan Plateau warming）..." autofocus>
-            <button class="btn-search" onclick="doSearch()">搜 索</button>
-        </div>
-        <div class="filter-row" style="gap:8px; flex-wrap:wrap;">
-            <input type="text" id="fAuthor" placeholder="作者（中文/拼音/英文，如 唐丽雅 / Tang）" style="flex:1; min-width:180px; padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
-            <select id="fJournal" style="padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px; max-width:260px;">
-                <option value="">全部期刊</option>
-            </select>
-            <input type="number" id="fYearMin" placeholder="年起" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
-            <input type="number" id="fYearMax" placeholder="年止" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
-            <select id="fStar" onchange="doSearch()" style="padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
-                <option value="">全部评分</option>
-                <option value="5">★★★ 仅 5 星</option>
-                <option value="4">★≥4</option>
-                <option value="3">★≥3</option>
-                <option value="2">★≥2</option>
-                <option value="1">★≥1（只看已评分）</option>
-            </select>
-            <button class="btn-search" style="padding:6px 14px; font-size:13px;" onclick="clearFilters()">清空过滤</button>
-        </div>
-        <div class="filter-row">
-            <span>快捷预设:</span>
-            <div class="quick-tags">
-                <span class="quick-tag" onclick="quickSearch('Holocene moisture precipitation')">全新世干湿与降水</span>
-                <span class="quick-tag" onclick="quickSearch('Tibetan Plateau elevation warming')">青藏高原海拔增温</span>
-                <span class="quick-tag" onclick="quickSearch('organic carbon burial lake')">湖泊有机碳埋藏</span>
-                <span class="quick-tag" onclick="quickSearch('vegetation dynamics remote sensing')">遥感植被动态</span>
-            </div>
-        </div>
-    </header>
-
-    <main class="gallery" id="gallery"></main>
-    <div id="countnote" style="text-align:center; color:#64748b; font-size:12px; padding:8px;"></div>
-    <div id="morewrap" style="display:none; text-align:center; padding:10px;"><button class="btn-search" onclick="appendBatch()">↓ 加载更多</button></div>
-    <div id="sentinel" style="height:1px;"></div>
-
-    <div class="modal" id="imageModal" onclick="closeModal(event)">
-        <div class="modal-content" onclick="event.stopPropagation()">
-            <button class="modal-close" onclick="closeModal()">&times;</button>
-            <div class="modal-img-container">
-                <img id="modalImg" src="" alt="Figure">
-            </div>
-            <div class="modal-details">
-                <div class="modal-head">
-                    <span id="modalFigNo" style="font-weight: bold; color: var(--accent);"></span>
-                    <span id="modalMeta" class="modal-meta"></span>
-                </div>
-                <div style="color: #fff; margin-bottom: 6px;" id="modalTitle"></div>
-                <div id="modalCaption"></div>
-            </div>
-        </div>
-    </div>
-
-    <div id="toast"></div>
-
-    <script>
-        let currentResults = [];
-        let lastQuery = '';
-        const BATCH = 24;
-        let loadedCount = 0;
-        let fetchTopK = 100;   // 随滚动逐轮加深: 100 -> 500
-        let io = null;
-
-        async function loadStats(retries = 6) {
-            // 失败重试：服务刚起时可能仍在加载向量矩阵，旧实现静默失败会让
-            // 徽标永久停在 “已收录 -- 张图表”（2026-10-28 用户截图实测）
-            for (let i = 0; i < retries; i++) {
-                try {
-                    const res = await fetch('/api/stats');
-                    const data = await res.json();
-                    if (typeof data.total_figures === 'number') {
-                        document.getElementById('statsBadge').innerText =
-                            `已收录 ${data.total_figures} 张图表 (${data.total_papers} 篇文献)`;
-                        return;
-                    }
-                } catch (e) {}
-                await new Promise(r => setTimeout(r, 700));
-            }
-            document.getElementById('statsBadge').innerText = '统计加载失败（服务可能仍在启动）';
-        }
-
-        // ---- 结构化过滤（作者/期刊/年份）：与语义 q 正交叠加，不做开关 ----
-        function filterParams() {
-            const p = [];
-            const a = document.getElementById('fAuthor').value.trim();
-            const j = document.getElementById('fJournal').value;
-            const y1 = document.getElementById('fYearMin').value;
-            const y2 = document.getElementById('fYearMax').value;
-            if (a) p.push('author=' + encodeURIComponent(a));
-            if (j) p.push('journal=' + encodeURIComponent(j) + '&journal_exact=1');
-            if (y1) p.push('year_min=' + y1);
-            if (y2) p.push('year_max=' + y2);
-            const st = document.getElementById('fStar').value;
-            if (st) p.push('star_min=' + st);
-            return p.length ? '&' + p.join('&') : '';
-        }
-        function clearFilters() {
-            document.getElementById('fAuthor').value = '';
-            document.getElementById('fJournal').value = '';
-            document.getElementById('fYearMin').value = '';
-            document.getElementById('fYearMax').value = '';
-            document.getElementById('fStar').value = '';
-            doSearch();
-        }
-        async function setStar(idx, n, e) {
-            if (e && e.stopPropagation) e.stopPropagation();
-            const item = currentResults[idx];
-            if (!item) return;
-            // 点已点亮的同一颗星 = 清除评分
-            const next = (item.rating === n) ? 0 : n;
-            try {
-                const res = await fetch('/api/rate', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({item_key: item.item_key, fig_no: item.fig_no, stars: next}),
-                });
-                const data = await res.json();
-                if (data.status !== 'ok') throw new Error(data.message || '评分写入失败');
-                item.rating = data.stars;
-                refreshStars(idx);
-            } catch (err) {
-                console.error('setStar failed:', err);
-            }
-        }
-        function refreshStars(idx) {
-            const item = currentResults[idx];
-            const box = document.querySelector('.card-stars[data-idx="' + idx + '"]');
-            if (!item || !box) return;
-            box.querySelectorAll('.star').forEach((el, k) => {
-                el.classList.toggle('on', (item.rating || 0) >= k + 1);
-            });
-            const label = box.querySelector('.star-label');
-            if (label) label.textContent = item.rating ? item.rating + ' 星' : '';
-        }
-        async function loadJournalOptions() {
-            try {
-                const res = await fetch('/api/facets');
-                const data = await res.json();
-                const sel = document.getElementById('fJournal');
-                (data.journals || []).forEach(([j, n]) => {
-                    const o = document.createElement('option');
-                    o.value = j; o.textContent = j + ' (' + n + ')';
-                    sel.appendChild(o);
-                });
-            } catch(e) {}
-        }
-
-        async function doSearch() {
-            const q = document.getElementById('searchInput').value.trim();
-            const fp = filterParams();
-            if (!q && !fp) return;
-
-            lastQuery = q;
-            const gallery = document.getElementById('gallery');
-            gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 40px;">正在通过 e5 多语言语义检索...</div>';
-
-            fetchTopK = 100;
-            try {
-                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&top_k=${fetchTopK}${fp}`);
-                const data = await res.json();
-                currentResults = data;
-                renderGallery(data);
-            } catch(e) {
-                gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #ef4444; padding: 40px;">检索出错，请查看控制台</div>';
-            }
-        }
-
-        function quickSearch(tag) {
-            document.getElementById('searchInput').value = tag;
-            doSearch();
-        }
-
-        document.getElementById('searchInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') doSearch();
-        });
-
-        function renderGallery(items) {
-            const gallery = document.getElementById('gallery');
-            loadedCount = 0;
-            if (!items || items.length === 0) {
-                gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 40px;">未找到匹配图表</div>';
-                updateMoreBtn();
-                return;
-            }
-            gallery.innerHTML = '';
-            appendBatch();
-        }
-
-        function cardHtml(item, idx) {
-            const fname = item.image_path.split(/[\\\\/]/).pop();
-            const imgSrc = `/image/${encodeURIComponent(fname)}`;
-            // 卡片只加载 480px 缩略图（~17KB）；灯箱用原图（≤1600px，对齐视觉模型有效像素上限）
-            const thumbSrc = item.thumb_name ? `/thumb/${encodeURIComponent(item.thumb_name)}` : imgSrc;
-
-            const openPdfUrl = item.att_key
-                ? `zotero://open-pdf/library/items/${item.att_key}?page=${item.page_no || 1}`
-                : `zotero://select/library/items/${item.item_key}`;
-
-            const wikilinkBtn = item.wikilink
-                ? `<button class="btn-action" onclick="copyField(${idx}, 'wikilink', this, event)" title="复制 Obsidian 双链: ${item.wikilink.replace(/"/g, '')}">
-                            <span>🔗 复制笔记双链</span>
-                        </button>`
-                : '';
-
-            return `
-            <div class="card">
-                <div class="card-img-wrap" onclick="openModal(${idx})">
-                    <img src="${thumbSrc}" loading="lazy" alt="${item.fig_no}">
-                </div>
-                <div class="card-body">
-                    <div class="card-meta">
-                        <span class="journal-badge">${(item.authors ? item.authors + ' · ' : '')}<em class="venue">${(item.journal_abbr || item.journal || 'Journal')}</em> (${item.year || 'N/A'}) · P.${item.page_no}</span>
-                        <span class="sim-score">相关度: ${(item.score * 100).toFixed(0)}%</span>
-                    </div>
-                    <div class="card-title">${item.title}</div>
-                    <div class="card-fig-row">
-                        <span class="card-fig-no">${item.fig_no}</span>
-                        <span class="card-stars" data-idx="${idx}" onclick="event.stopPropagation()">
-                            ${[1, 2, 3, 4, 5].map(n => `<span class="star${(item.rating || 0) >= n ? ' on' : ''}" onclick="setStar(${idx}, ${n}, event)" title="${n} 星（再点同一星清除）">★</span>`).join('')}
-                            <span class="star-label">${item.rating ? item.rating + ' 星' : ''}</span>
-                        </span>
-                    </div>
-                    <div class="card-caption" title="${item.caption}"><strong>题注:</strong> ${item.caption}</div>
-                    <div class="card-actions" onclick="event.stopPropagation()">
-                        <a class="btn-action btn-pdf" href="${openPdfUrl}" onclick="openZoteroProtocol(event, '${openPdfUrl}')" title="在 Zotero 中直接打开 PDF 并滚动到第 ${item.page_no} 页此图">
-                            <span>📄 打开 PDF 到此图</span>
-                        </a>
-                        ${wikilinkBtn}
-                        <button class="btn-action" onclick="copyField(${idx}, 'imgembed', this, event)" title="复制可直接在 Obsidian 渲染的图片链接">
-                            <span>🖼️ 复制图片嵌入</span>
-                        </button>
-                        <button class="btn-action" onclick="copyField(${idx}, 'dshprompt', this, event)" title="复制用于 DSH 视觉分析的提示词">
-                            <span>🤖 问 DSH</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            `;
-        }
-
-        async function appendBatch() {
-            const gallery = document.getElementById('gallery');
-            let next = currentResults.slice(loadedCount, loadedCount + BATCH);
-            if (!next.length && currentResults.length >= fetchTopK && fetchTopK < 500) {
-                fetchTopK += 100;
-                try {
-                    const rr = await fetch(`/api/search?q=${encodeURIComponent(lastQuery)}&top_k=${fetchTopK}${filterParams()}`);
-                    currentResults = await rr.json();
-                } catch(e) {}
-                next = currentResults.slice(loadedCount, loadedCount + BATCH);
-            }
-            if (!next.length) { updateMoreBtn(); return; }
-            const html = next.map((item, rel) => cardHtml(item, loadedCount + rel)).join('');
-            gallery.insertAdjacentHTML('beforeend', html);
-            loadedCount += next.length;
-            updateMoreBtn();
-        }
-
-        function updateMoreBtn() {
-            const wrap = document.getElementById('morewrap');
-            const counter = document.getElementById('countnote');
-            const canMore = loadedCount < currentResults.length || (currentResults.length >= fetchTopK && fetchTopK < 500);
-            if (wrap) wrap.style.display = canMore ? 'block' : 'none';
-            if (counter) counter.textContent = currentResults.length ? `已加载 ${loadedCount} / ${currentResults.length} 张匹配图表` : '';
-        }
-
-        // 无限滚动：哨兵进入视口前 800px 即追加下一批；DOM 由 content-visibility 跳过屏外渲染
-        (function setupInfiniteScroll() {
-            const sentinel = document.getElementById('sentinel');
-            if (!sentinel || !('IntersectionObserver' in window)) return;
-            io = new IntersectionObserver((entries) => {
-                if (entries[0].isIntersecting) appendBatch();
-            }, { rootMargin: '800px 0px' });
-            io.observe(sentinel);
-        })();
-
-        function openModal(idx) {
-            const item = currentResults[idx];
-            if (!item) return;
-            resetZoom();
-            const fname = item.image_path.split(/[\\\\/]/).pop();
-            document.getElementById('modalImg').src = `/image/${encodeURIComponent(fname)}`;
-            document.getElementById('modalFigNo').innerText = `${item.fig_no} (PDF 第 ${item.page_no} 页)`;
-            // 元数据合并一行：作者 · 期刊全称（斜体）· 年份
-            // 模态框横向空间充足，期刊优先全称；卡片窄栏仍用 journal_abbr
-            // 期刊名走 <em>，故此处用 innerHTML：authors/venue 必须转义
-            const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
-                (ch) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
-            const metaBits = [];
-            if (item.authors) metaBits.push(esc(item.authors));
-            const venueFull = item.journal || item.journal_abbr || '';
-            if (venueFull) metaBits.push('<em class="venue">' + esc(venueFull) + '</em>');
-            if (item.year) metaBits.push(esc(String(item.year)));
-            document.getElementById('modalMeta').innerHTML = metaBits.join(' · ');
-            document.getElementById('modalTitle').innerText = item.title;
-            document.getElementById('modalCaption').innerText = item.caption;
-            document.getElementById('imageModal').classList.add('active');
-        }
-
-        function closeModal() {
-            document.getElementById('imageModal').classList.remove('active');
-            resetZoom();
-        }
-
-        let zoomScale = 1;
-        let panX = 0, panY = 0;
-        let isPanning = false;
-        let startX = 0, startY = 0;
-        let hasMoved = false;
-
-        function updateTransform(smooth = false) {
-            const img = document.getElementById('modalImg');
-            if (!img) return;
-            img.style.transition = smooth ? 'transform 0.16s cubic-bezier(0.2, 0, 0.2, 1)' : 'none';
-            if (zoomScale <= 1.01) {
-                zoomScale = 1;
-                panX = 0;
-                panY = 0;
-                img.style.transform = 'none';
-                img.style.cursor = 'zoom-in';
-            } else {
-                img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomScale})`;
-                img.style.cursor = isPanning ? 'grabbing' : 'grab';
-            }
-        }
-
-        function resetZoom() {
-            zoomScale = 1;
-            panX = 0;
-            panY = 0;
-            isPanning = false;
-            hasMoved = false;
-            updateTransform(false);
-        }
-
-        (function setupZoom() {
-            const container = document.querySelector('.modal-img-container');
-            const img = document.getElementById('modalImg');
-            if (!container || !img) return;
-
-            img.addEventListener('mousedown', (e) => {
-                if (e.button !== 0) return;
-                hasMoved = false;
-                if (zoomScale > 1) {
-                    isPanning = true;
-                    startX = e.clientX - panX;
-                    startY = e.clientY - panY;
-                    img.style.cursor = 'grabbing';
-                    e.preventDefault();
-                }
-            });
-
-            window.addEventListener('mousemove', (e) => {
-                if (!isPanning) return;
-                hasMoved = true;
-                panX = e.clientX - startX;
-                panY = e.clientY - startY;
-                updateTransform(false);
-            });
-
-            window.addEventListener('mouseup', () => {
-                if (isPanning) {
-                    isPanning = false;
-                    updateTransform(false);
-                }
-            });
-
-            img.addEventListener('click', (e) => {
-                if (hasMoved) return; // 用户在拖拽平移，不触发缩放切换
-                if (zoomScale <= 1.01) {
-                    const rect = img.getBoundingClientRect();
-                    const offsetX = e.clientX - (rect.left + rect.width / 2);
-                    const offsetY = e.clientY - (rect.top + rect.height / 2);
-                    zoomScale = 2.4;
-                    panX = -offsetX * (zoomScale - 1);
-                    panY = -offsetY * (zoomScale - 1);
-                    updateTransform(true);
-                } else {
-                    resetZoom();
-                }
-            });
-
-            container.addEventListener('wheel', (e) => {
-                const modal = document.getElementById('imageModal');
-                if (!modal || !modal.classList.contains('active')) return;
-                e.preventDefault();
-                const factor = e.deltaY < 0 ? 1.25 : 0.8;
-                const newScale = Math.max(1, Math.min(8, zoomScale * factor));
-                if (newScale <= 1.01) {
-                    resetZoom();
-                    return;
-                }
-                const rect = img.getBoundingClientRect();
-                const mouseX = e.clientX - (rect.left + rect.width / 2);
-                const mouseY = e.clientY - (rect.top + rect.height / 2);
-                const scaleRatio = newScale / zoomScale;
-                panX = mouseX - (mouseX - panX) * scaleRatio;
-                panY = mouseY - (mouseY - panY) * scaleRatio;
-                zoomScale = newScale;
-                updateTransform(false);
-            }, { passive: false });
-        })();
-
-        function showToast(msg, isError) {
-            const t = document.getElementById('toast');
-            t.textContent = msg;
-            t.style.background = isError ? '#be123c' : '#0284c7';
-            t.classList.add('show');
-            setTimeout(() => t.classList.remove('show'), 2600);
-        }
-
-        async function triggerUpdate() {
-            const btn = document.getElementById('btnUpdate');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<span>⏳ 扫描入库中...</span>';
-            btn.disabled = true;
-
-            try {
-                const res = await fetch('/api/update', { method: 'POST' });
-                const data = await res.json();
-                if (data.status === 'ok') {
-                    showToast(`增量更新完成：新入库 ${data.new_figures} 张图表`);
-                    loadStats();
-                    doSearch();
-                } else {
-                    showToast('更新失败: ' + (data.message || '未知错误'), true);
-                }
-            } catch (e) {
-                showToast('请求更新失败: ' + e, true);
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-            }
-        }
-
-        async function shutdownServer() {
-            if (!confirm('确定要关停本地 zoteo-fig-db 图库服务吗？关停后网页将无法访问。')) return;
-            const btn = document.getElementById('btnShutdown');
-            if (btn) btn.innerHTML = '<span>⏳ 正在停止...</span>';
-            try {
-                await fetch('/api/shutdown', { method: 'POST' });
-            } catch (e) {}
-            // 尝试同时停止远端关联进程（如果有），并替换当前页面展示
-            document.body.innerHTML = `
-                <div style="display: flex; height: 80vh; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-family: sans-serif;">
-                    <h2 style="color: #f8fafc; margin-bottom: 12px;">服务已成功停止</h2>
-                    <p>后台服务已关停，写入 .manual_stop 防自启标记。如需重新使用，在开始菜单启动「zoteo-fig-db」即可。</p>
-                </div>
-            `;
-        }
-
-        function openZoteroProtocol(e, url) {
-            e.preventDefault();
-            e.stopPropagation();
-            let ifr = document.getElementById('protocolIframe');
-            if (!ifr) {
-                ifr = document.createElement('iframe');
-                ifr.id = 'protocolIframe';
-                ifr.style.display = 'none';
-                document.body.appendChild(ifr);
-            }
-            ifr.src = url;
-        }
-
-        function copyToClipboard(text) {
-            if (navigator.clipboard && window.isSecureContext) {
-                return navigator.clipboard.writeText(text);
-            }
-            return new Promise((resolve, reject) => {
-                try {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.position = 'fixed';
-                    ta.style.left = '-9999px';
-                    ta.style.top = '-9999px';
-                    document.body.appendChild(ta);
-                    ta.focus();
-                    ta.select();
-                    const successful = document.execCommand('copy');
-                    document.body.removeChild(ta);
-                    if (successful) resolve();
-                    else reject(new Error('execCommand failed'));
-                } catch (err) {
-                    reject(err);
-                }
-            });
-        }
-
-        function copyField(idx, field, btn, e) {
-            if (e && e.stopPropagation) e.stopPropagation();
-            const item = currentResults[idx];
-            if (!item) return;
-            let text = '';
-            if (field === 'wikilink') {
-                text = item.wikilink;
-            } else if (field === 'imgembed') {
-                const fname = item.image_path.split(/[\\\\/]/).pop();
-                text = `![${item.fig_no}](${window.location.origin}/image/${encodeURIComponent(fname)})`;
-            } else if (field === 'dshprompt') {
-                const p = item.image_path.replace(/\\\\/g, '/');
-                text = `请结合地学背景深度解读此图 ${p}: ${item.caption}`;
-            }
-            if (!text) return;
-            copyToClipboard(text).then(() => {
-                if (!btn) return;
-                const orig = btn.innerHTML;
-                btn.innerHTML = '<span>✓ 已复制</span>';
-                btn.style.background = '#16a34a';
-                setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 1200);
-            }).catch(() => {
-                if (!btn) return;
-                const orig = btn.innerHTML;
-                btn.innerHTML = '<span>⚠️ 复制失败</span>';
-                btn.style.background = '#e11d48';
-                setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 1500);
-            });
-        }
-
-        // 初始不加载任何图片：避免打开网页就拉全库；等用户输入或点快捷预设
-        loadStats();
-        loadJournalOptions();
-        document.getElementById('gallery').innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 60px 0;">输入关键词或点击上方快捷预设，开始语义检索图表</div>';
-    </script>
-    <div style="text-align:center;color:#64748b;font-size:11px;padding:10px 0 16px;" id="addrbar"></div>
-    <script>
-        fetch('/api/urls').then(r => r.json()).then(d => {
-            document.getElementById('addrbar').textContent = '访问地址：' + d.urls.join('　·　') + '　（本机用 127.0.0.1，跨设备用 overlay 恒定地址）';
-        }).catch(() => {});
-    </script>
-    <div id="backTop" title="回到顶部" style="position:fixed;right:18px;bottom:18px;z-index:900;display:none;width:42px;height:42px;border-radius:50%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;cursor:pointer;font-size:18px;line-height:42px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.45);user-select:none;">↑</div>
-    <script>
-        window.addEventListener('scroll', () => {
-            document.getElementById('backTop').style.display = window.scrollY > 700 ? 'block' : 'none';
-        }, { passive: true });
-        document.getElementById('backTop').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
-    </script>
-</body>
-</html>
-"""
 
 
 class ZoteoFigHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
+        """HEAD 与 GET 同路由：首页回 HTML 头、图片走同一个 ETag 判定，其余 404。"""
+        path = urllib.parse.urlparse(self.path).path
+        if path in ("/", "/index.html"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+        elif path.startswith("/static/"):
+            self._serve_static(os.path.basename(path[len("/static/"):]), send_body=False)
+        elif path.startswith(("/image/", "/thumb/")):
+            self._serve_image(path, send_body=False)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    STATIC_MIME = {
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+        ".svg": "image/svg+xml",
+    }
+
+    def _serve_static(self, name, send_body=True):
+        """static/ 下的前端文件。
+
+        一律 no-cache：改完 JS 后浏览器还在跑旧代码的坑踩过两次（2026-11-15），
+        本地服务多传 40KB 换"刷新即生效"，比省带宽值。
+        """
+        static_path = os.path.join(STATIC_DIR, name)
+        if not name or not os.path.isfile(static_path):
+            self.send_response(404)
+            self.end_headers()
+            return
+        mime = self.STATIC_MIME.get(os.path.splitext(name)[1].lower(), "application/octet-stream")
+        with open(static_path, "rb") as static_file:
+            body = static_file.read()
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, must-revalidate")
         self.end_headers()
+        if send_body:
+            self.wfile.write(body)
+
+    def _serve_image(self, path, send_body=True):
+        """图片/缩略图：ETag + Last-Modified + 304。
+
+        图片一次入库即不再改写（重抽会覆盖同名文件 → mtime 变），
+        故 (size, mtime_ns) 足以做版本标识，不必对整文件算哈希。
+        一屏 24 张、滚到 500 张，跨设备走 overlay 时省掉全量重传。
+        """
+        prefix = "/thumb/" if path.startswith("/thumb/") else "/image/"
+        fname = os.path.basename(urllib.parse.unquote(path[len(prefix):]))
+        if prefix == "/thumb/" and not fname.endswith(".thumb.webp"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        img_path = os.path.join(IMAGE_DIR, fname)
+        # 空 fname 会落到 IMAGE_DIR 本身：必须挡掉，否则 stat 目录成功 → 200 + 目录大小头
+        # + open(dir) 抛 IsADirectoryError → 响应已发头又被 500 覆写（2026-11-15 实测）
+        if not fname or not os.path.isfile(img_path):
+            self.send_response(404)
+            self.end_headers()
+            return
+        try:
+            file_stat = os.stat(img_path)
+        except OSError:
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        etag = f'"{file_stat.st_size:x}-{file_stat.st_mtime_ns:x}"'
+        # formatdate(usegmt=True) 与 locale 无关，strftime("%a") 在中文 Windows 下会输出本地星期名
+        last_modified = email.utils.formatdate(file_stat.st_mtime, usegmt=True)
+        if self._not_modified(etag, file_stat.st_mtime):
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Last-Modified", last_modified)
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            return
+
+        ext = os.path.splitext(fname)[1].lower()
+        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}.get(ext, "image/webp")
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(file_stat.st_size))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", last_modified)
+        self.end_headers()
+        if not send_body:
+            return
+        with open(img_path, "rb") as image_file:
+            self.wfile.write(image_file.read())
+
+    def _not_modified(self, etag, mtime):
+        """If-None-Match 优先；无该头时退回 If-Modified-Since（HTTP 日期只到秒）。"""
+        if_none_match = self.headers.get("If-None-Match")
+        if if_none_match:
+            if if_none_match.strip() == "*":
+                return True
+            return etag in [tag.strip() for tag in if_none_match.split(",")]
+        if_modified_since = self.headers.get("If-Modified-Since")
+        if not if_modified_since:
+            return False
+        try:
+            since = email.utils.parsedate_to_datetime(if_modified_since).timestamp()
+        except (TypeError, ValueError):
+            return False
+        return int(mtime) <= int(since)
 
     def do_GET(self):
         """全局兜底：未捕获异常一律回 500，绝不让请求线程静默断开（2026-10-28 审计发现）。"""
@@ -946,9 +223,27 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as e:
+            self._log_traceback("GET " + str(getattr(self, "path", "")))
             self._send_error_json(500, type(e).__name__, str(e))
 
+    def _log_traceback(self, where):
+        """完整栈落盘：只记 type+message 时 'NoneType is not iterable' 这类错误无处可查。"""
+        try:
+            with open(os.path.join(BASE_DIR, "cache", "server.log"), "a",
+                      encoding="utf-8") as log_file:
+                log_file.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{where}]\n")
+                log_file.write(traceback.format_exc())
+        except OSError:
+            pass
+
     def _send_error_json(self, code, kind, message):
+        # 服务端由 watchdog 以 DEVNULL 启动，stdout/stderr 全丢；异常必须自己落盘才能事后追溯
+        try:
+            with open(os.path.join(BASE_DIR, "cache", "server.log"), "a",
+                      encoding="utf-8") as log_file:
+                log_file.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{code}] {kind}: {message}\n")
+        except OSError:
+            pass
         try:
             body = json.dumps({"error": kind, "message": (message or "")[:300]},
                               ensure_ascii=False).encode("utf-8")
@@ -985,10 +280,13 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
 
         if path == "/" or path == "/index.html":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(HTML_CONTENT.encode("utf-8"))
+            # 只由 _serve_static 发一次响应：先 send_response/end_headers 会让第二个
+            # 响应头被写进 body（浏览器把 "HTTP/1.0 200 OK" 当正文渲染，2026-11-15 实测）
+            self._serve_static("index.html")
+            return
+
+        elif path.startswith("/static/"):
+            self._serve_static(os.path.basename(path[len("/static/"):]))
             return
 
         elif path == "/api/stats":
@@ -999,6 +297,32 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(stats, ensure_ascii=False).encode("utf-8"))
             return
 
+        elif path == "/api/jobs/latest":
+            snapshot = job_latest()
+            self.send_response(200 if snapshot else 404)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(snapshot or {"error": "no job"},
+                                        ensure_ascii=False).encode("utf-8"))
+            return
+
+        elif path.startswith("/api/jobs/"):
+            snapshot = job_snapshot(path[len("/api/jobs/"):])
+            self.send_response(200 if snapshot else 404)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(snapshot or {"error": "job not found"},
+                                        ensure_ascii=False).encode("utf-8"))
+            return
+
+        elif path == "/api/presets":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"presets": presets.load()},
+                                        ensure_ascii=False).encode("utf-8"))
+            return
+
         elif path == "/api/urls":
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1007,10 +331,6 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             return
 
         elif path == "/api/search":
-            global searcher
-            if searcher is None:
-                searcher = FigureSearcher()
-
             q = query.get("q", [""])[0]
             top_k = self._int_param(query, "top_k", 20, 1, 500)
             journal = query.get("journal", [None])[0]
@@ -1027,7 +347,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             # 个人评分过滤：只在明确传参时生效，未传 = 不按评分筛（默认视图不变）
             star_min = self._int_param(query, "star_min", None, 1, 5)
 
-            results = searcher.search(
+            results = get_searcher().search(
                 query=q,
                 top_k=top_k,
                 journal_filter=journal,
@@ -1049,11 +369,9 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             return
 
         elif path == "/api/facets":
-            if searcher is None:
-                searcher = FigureSearcher()
             from collections import Counter
             from family_rules import journal_family
-            metas = searcher._metas
+            metas = get_searcher()._metas
             jc = Counter((m.get("journal") or "").strip() for m in metas)
             jc.pop("", None)
             fams = Counter()
@@ -1073,33 +391,8 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             return
 
         elif path.startswith("/image/") or path.startswith("/thumb/"):
-            prefix = "/image/" if path.startswith("/image/") else "/thumb/"
-            fname = urllib.parse.unquote(path[len(prefix):])
-            fname = os.path.basename(fname)
-            if prefix == "/thumb/" and not fname.endswith(".thumb.webp"):
-                self.send_response(404)
-                self.end_headers()
-                return
-            img_path = os.path.join(IMAGE_DIR, fname)
-            if os.path.exists(img_path):
-                ext = os.path.splitext(fname)[1].lower()
-                mime = "image/webp"
-                if ext == ".png":
-                    mime = "image/png"
-                elif ext in [".jpg", ".jpeg"]:
-                    mime = "image/jpeg"
-
-                self.send_response(200)
-                self.send_header("Content-Type", mime)
-                self.send_header("Cache-Control", "public, max-age=86400")
-                self.end_headers()
-                with open(img_path, "rb") as f:
-                    self.wfile.write(f.read())
-                return
-            else:
-                self.send_response(404)
-                self.end_headers()
-                return
+            self._serve_image(path)
+            return
 
         self.send_response(404)
         self.end_headers()
@@ -1111,6 +404,7 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as e:
+            self._log_traceback("POST " + str(getattr(self, "path", "")))
             self._send_error_json(500, type(e).__name__, str(e))
 
     def _do_POST(self):
@@ -1139,9 +433,6 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b'{"error":"q: string or list(<=50) required"}')
                 return
-            global searcher
-            if searcher is None:
-                searcher = FigureSearcher()
             top_k = max(1, min(500, int(body.get("top_k", 20))))
             star_min = body.get("star_min")
             try:
@@ -1157,12 +448,37 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                       author=body.get("author"),
                       journal_exact=str(body.get("journal_exact", "0")).lower() in ("1", "true", "yes"),
                       rating_min=star_min, rating_map=ratings.as_lookup())
-            out = [searcher.search(x, top_k=top_k, **kw) for x in qlist]
+            out = [get_searcher().search(x, top_k=top_k, **kw) for x in qlist]
             payload = out[0] if single else {"results": out}
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if path == "/api/presets":
+            # 整体替换：前端持有全量列表，避免逐条增删在并发下叠加错乱
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            except (TypeError, ValueError):
+                body = None
+            try:
+                if not isinstance(body, dict):
+                    raise ValueError("JSON body required")
+                saved = presets.save(body.get("presets"))
+            except (ValueError, TypeError) as exc:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": str(exc)},
+                                            ensure_ascii=False).encode("utf-8"))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok", "presets": saved},
+                                        ensure_ascii=False).encode("utf-8"))
             return
 
         if path == "/api/rate":
@@ -1189,6 +505,41 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"status": "ok", "stars": stars,
                                          "summary": ratings.summarize()},
+                                        ensure_ascii=False).encode("utf-8"))
+            return
+
+        if path == "/api/jobs/index":
+            # 首次索引与增量更新共用一个入口：空库自动全量，否则最近 30 篇
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            except (TypeError, ValueError):
+                body = {}
+            if not isinstance(body, dict):
+                body = {}
+            empty_library = db.get_stats().get("total_figures", 0) == 0
+            limit = body.get("limit")
+            if limit is None:
+                limit = None if empty_library else 30
+            force = bool(body.get("force", True))
+            # 旧任务若还停在未完成状态（进程重启/线程异常），标成 error 免得前端一直轮询僵尸任务
+            with _jobs_lock:
+                for stale in _jobs.values():
+                    if stale.get("stage") not in ("done", "error"):
+                        stale["stage"] = "error"
+                        stale["message"] = "被新的更新任务替代"
+                        stale["finished_at"] = time.time()
+            job_id = uuid.uuid4().hex[:12]
+            _job_update(job_id, id=job_id, kind="index", stage="queued",
+                        total=0, done=0, started_at=time.time(),
+                        mode="全库" if limit is None else f"最近 {limit} 篇",
+                        message="排队中")
+            threading.Thread(target=_run_index_job, args=(job_id, limit, force),
+                             daemon=True).start()
+            self.send_response(202)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "accepted", "job_id": job_id},
                                         ensure_ascii=False).encode("utf-8"))
             return
 
@@ -1258,7 +609,6 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 os._exit(0)
-            import threading
             threading.Thread(target=killer).start()
             return
 
@@ -1329,12 +679,9 @@ def run():
 
     # 后台预热：只构建服务端内存缓存（向量矩阵+笔记映射），不向浏览器发送任何图片
     def warm_caches():
-        global searcher
         try:
             time.sleep(0.5)
-            if searcher is None:
-                searcher = FigureSearcher()
-            searcher._ensure_cache()
+            get_searcher()._ensure_cache()
             import notes_index
             notes_index.get_notes_map()
         except Exception:

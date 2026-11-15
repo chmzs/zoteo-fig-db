@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>zoteo-fig-db · 地学文献图库</title>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+    <header>
+        <div class="header-top">
+            <div class="title-group">
+                <h1>🌍 zoteo-fig-db <span style="font-size:14px;color:#94a3b8;font-weight:400;">地学文献图库</span></h1>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="stats-badge" id="statsBadge">已收录 -- 张图表 (-- 篇文献)</div>
+                <button class="btn-action" style="flex: none; background: #0284c7; font-weight: 600;" onclick="triggerUpdate()" id="btnUpdate" title="增量扫描 Zotero 最近入库文献并提取图表">
+                    <span>🔄 增量更新</span>
+                </button>
+                <button class="btn-action" id="btnShutdown" style="flex: none; background: #475569;" onclick="shutdownServer()" title="安全关停本地图表服务">
+                    <span>⏹️ 关闭服务</span>
+                </button>
+            </div>
+        </div>
+        <div class="search-container">
+            <input type="text" id="searchInput" class="search-input" placeholder="输入自然语言或关键词（例如：全新世降水对比 / lake organic carbon / Tibetan Plateau warming）..." autofocus>
+            <button class="btn-search" onclick="doSearch()">搜 索</button>
+        </div>
+        <div class="filter-row" style="gap:8px; flex-wrap:wrap;">
+            <input type="text" id="fAuthor" placeholder="作者（中文/拼音/英文，如 唐丽雅 / Tang）" style="flex:1; min-width:180px; padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+            <select id="fJournal" style="padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px; max-width:260px;">
+                <option value="">全部期刊</option>
+            </select>
+            <input type="number" id="fYearMin" placeholder="年起" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+            <input type="number" id="fYearMax" placeholder="年止" style="width:80px; padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+            <select id="fStar" onchange="doSearch()" style="padding:6px 8px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px;">
+                <option value="">全部评分</option>
+                <option value="5">★★★ 仅 5 星</option>
+                <option value="4">★≥4</option>
+                <option value="3">★≥3</option>
+                <option value="2">★≥2</option>
+                <option value="1">★≥1（只看已评分）</option>
+            </select>
+            <button class="btn-search" style="padding:6px 14px; font-size:13px;" onclick="clearFilters()">清空过滤</button>
+        </div>
+        <div class="filter-row">
+            <span>快捷预设:</span>
+            <div class="quick-tags" id="quickTags"></div>
+            <button type="button" class="quick-edit" id="btnPresetEdit" onclick="togglePresetEdit()" title="增删改快捷预设">⚙️ 编辑</button>
+        </div>
+        <div class="filter-row" id="presetForm" style="display:none;">
+            <input type="text" id="presetLabel" class="preset-input" placeholder="显示名（≤30 字）" maxlength="30">
+            <input type="text" id="presetQuery" class="preset-input preset-input-wide" placeholder="检索词（留空=用显示名）" maxlength="200">
+            <button type="button" class="btn-search preset-btn" onclick="savePreset()">保存</button>
+            <button type="button" class="btn-search preset-btn preset-btn-muted" onclick="cancelPresetEdit()">取消</button>
+            <span class="preset-hint" id="presetHint"></span>
+        </div>
+        <div class="job-bar" id="jobBar" style="display:none;">
+            <div class="job-track"><div class="job-fill" id="jobFill"></div></div>
+            <span class="job-text" id="jobText"></span>
+        </div>
+    </header>
+
+    <main class="gallery" id="gallery"></main>
+    <div id="countnote" style="text-align:center; color:#64748b; font-size:12px; padding:8px;"></div>
+    <div id="morewrap" style="display:none; text-align:center; padding:10px;"><button class="btn-search more-btn" onclick="appendBatch()"><svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.6 6.2 8 10.4l4.4-4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>加载更多</span></button></div>
+    <div id="sentinel" style="height:1px;"></div>
+
+    <dialog id="imageModal" aria-label="图表预览" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeModal()" aria-label="关闭预览">&times;</button>
+            <div class="modal-img-container">
+                <img id="modalImg" src="" alt="Figure">
+            </div>
+            <div class="modal-details">
+                <div class="modal-head">
+                    <span id="modalFigNo" style="font-weight: bold; color: var(--accent);"></span>
+                    <span id="modalMeta" class="modal-meta"></span>
+                </div>
+                <div style="color: #fff; margin-bottom: 6px;" id="modalTitle"></div>
+                <div id="modalCaption"></div>
+            </div>
+        </div>
+</dialog>
+
+    <div id="toast"></div>
+
+    
+    <div style="text-align:center;color:#64748b;font-size:11px;padding:10px 0 16px;" id="addrbar"></div>
+    
+    <button type="button" id="backTop" aria-label="回到顶部" title="回到顶部"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.6 9.8 8 5.6l4.4 4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>
