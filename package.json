@@ -1,0 +1,12 @@
+{
+  "name": "zoteo-fig-db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend type-check only; the served artifact is static/app.js (no build step).",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

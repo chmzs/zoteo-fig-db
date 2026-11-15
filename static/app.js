@@ -1,3 +1,12 @@
+// @ts-check
+
+// getElementById 的集中断言：页面结构固定，元素必然存在；集中一处换取调用点清爽。
+// 注意：DOM 属性名因此不做编译期校验，本文件类型检查的价值在 **数据契约**（SearchItem/JobState）。
+/** @param {string} id @returns {any} */
+function byId(id) {
+    return document.getElementById(id);   // 必须是原生调用：批量替换曾把它改成 byId(id) → 无限递归
+}
+/** @type {SearchItem[]} */
 let currentResults = [];
 let lastQuery = '';
 const BATCH = 24;
@@ -24,37 +33,37 @@ async function loadStats(retries = 6) {
             const res = await fetch('/api/stats');
             const data = await res.json();
             if (typeof data.total_figures === 'number') {
-                document.getElementById('statsBadge').innerText =
+                byId('statsBadge').innerText =
                     `已收录 ${data.total_figures} 张图表 (${data.total_papers} 篇文献)`;
                 return;
             }
         } catch (e) {}
         await new Promise(r => setTimeout(r, 700));
     }
-    document.getElementById('statsBadge').innerText = '统计加载失败（服务可能仍在启动）';
+    byId('statsBadge').innerText = '统计加载失败（服务可能仍在启动）';
 }
 
 // ---- 结构化过滤（作者/期刊/年份）：与语义 q 正交叠加，不做开关 ----
 function filterParams() {
     const p = [];
-    const a = document.getElementById('fAuthor').value.trim();
-    const j = document.getElementById('fJournal').value;
-    const y1 = document.getElementById('fYearMin').value;
-    const y2 = document.getElementById('fYearMax').value;
+    const a = byId('fAuthor').value.trim();
+    const j = byId('fJournal').value;
+    const y1 = byId('fYearMin').value;
+    const y2 = byId('fYearMax').value;
     if (a) p.push('author=' + encodeURIComponent(a));
     if (j) p.push('journal=' + encodeURIComponent(j) + '&journal_exact=1');
     if (y1) p.push('year_min=' + y1);
     if (y2) p.push('year_max=' + y2);
-    const st = document.getElementById('fStar').value;
+    const st = byId('fStar').value;
     if (st) p.push('star_min=' + st);
     return p.length ? '&' + p.join('&') : '';
 }
 function clearFilters() {
-    document.getElementById('fAuthor').value = '';
-    document.getElementById('fJournal').value = '';
-    document.getElementById('fYearMin').value = '';
-    document.getElementById('fYearMax').value = '';
-    document.getElementById('fStar').value = '';
+    byId('fAuthor').value = '';
+    byId('fJournal').value = '';
+    byId('fYearMin').value = '';
+    byId('fYearMax').value = '';
+    byId('fStar').value = '';
     doSearch();
 }
 async function setStar(idx, n, e) {
@@ -93,7 +102,7 @@ async function loadJournalOptions() {
     try {
         const res = await fetch('/api/facets');
         const data = await res.json();
-        const sel = document.getElementById('fJournal');
+        const sel = byId('fJournal');
         (data.journals || []).forEach(([j, n]) => {
             const o = document.createElement('option');
             o.value = j; o.textContent = j + ' (' + n + ')';
@@ -103,6 +112,7 @@ async function loadJournalOptions() {
 }
 
 // ---- 快捷预设：服务端 sidecar（presets.json），跨设备一致 ----
+/** @type {Preset[]} */
 let presets = [];
 let presetEditMode = false;
 let editingPresetIndex = -1;
@@ -119,7 +129,7 @@ async function loadPresets() {
 }
 
 function renderPresets() {
-    const box = document.getElementById('quickTags');
+    const box = byId('quickTags');
     if (!box) return;
     box.innerHTML = '';
     presets.forEach((preset, index) => {
@@ -131,7 +141,8 @@ function renderPresets() {
                 + '<span class="tag-del" title="删除">✕</span>';
             tag.title = '点击修改检索词：' + preset.query;
             tag.onclick = (event) => {
-                if (event.target && event.target.classList.contains('tag-del')) {
+                const target = /** @type {HTMLElement} */ (event.target);
+                if (target && target.classList.contains('tag-del')) {
                     deletePreset(index);
                 } else {
                     beginEditPreset(index);
@@ -152,7 +163,7 @@ function renderPresets() {
         addBtn.onclick = () => beginEditPreset(-1);
         box.appendChild(addBtn);
     }
-    const editBtn = document.getElementById('btnPresetEdit');
+    const editBtn = byId('btnPresetEdit');
     if (editBtn) editBtn.textContent = presetEditMode ? '✓ 完成' : '⚙️ 编辑';
 }
 
@@ -165,26 +176,26 @@ function togglePresetEdit() {
 function beginEditPreset(index) {
     editingPresetIndex = index;
     const preset = index >= 0 ? presets[index] : { label: '', query: '' };
-    document.getElementById('presetLabel').value = preset.label || '';
-    document.getElementById('presetQuery').value = index >= 0 ? (preset.query || '') : '';
-    document.getElementById('presetForm').style.display = 'flex';
-    document.getElementById('presetHint').textContent =
+    byId('presetLabel').value = preset.label || '';
+    byId('presetQuery').value = index >= 0 ? (preset.query || '') : '';
+    byId('presetForm').style.display = 'flex';
+    byId('presetHint').textContent =
         index >= 0 ? '正在修改：' + preset.label : '新增预设（最多 20 条）';
-    document.getElementById('presetLabel').focus();
+    byId('presetLabel').focus();
 }
 
 function cancelPresetEdit() {
     editingPresetIndex = -1;
-    const form = document.getElementById('presetForm');
+    const form = byId('presetForm');
     if (form) form.style.display = 'none';
-    const hint = document.getElementById('presetHint');
+    const hint = byId('presetHint');
     if (hint) hint.textContent = '';
 }
 
 async function savePreset() {
-    const label = (document.getElementById('presetLabel').value || '').trim();
-    const query = (document.getElementById('presetQuery').value || '').trim();
-    const hint = document.getElementById('presetHint');
+    const label = (byId('presetLabel').value || '').trim();
+    const query = (byId('presetQuery').value || '').trim();
+    const hint = byId('presetHint');
     if (!label) {
         hint.textContent = '显示名不能为空';
         return;
@@ -218,7 +229,7 @@ async function deletePreset(index) {
 }
 
 async function persistPresets(next, okMessage) {
-    const hint = document.getElementById('presetHint');
+    const hint = byId('presetHint');
     try {
         const res = await fetch('/api/presets', {
             method: 'POST',
@@ -237,12 +248,12 @@ async function persistPresets(next, okMessage) {
 }
 
 async function doSearch() {
-    const q = document.getElementById('searchInput').value.trim();
+    const q = byId('searchInput').value.trim();
     const fp = filterParams();
     if (!q && !fp) return;
 
     lastQuery = q;
-    const gallery = document.getElementById('gallery');
+    const gallery = byId('gallery');
     gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 40px;">正在通过 e5 多语言语义检索...</div>';
 
     fetchTopK = 100;
@@ -272,16 +283,17 @@ async function doSearch() {
 }
 
 function quickSearch(tag) {
-    document.getElementById('searchInput').value = tag;
+    byId('searchInput').value = tag;
     doSearch();
 }
 
-document.getElementById('searchInput').addEventListener('keydown', (e) => {
+byId('searchInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doSearch();
 });
 
+/** @param {SearchItem[]} items */
 function renderGallery(items) {
-    const gallery = document.getElementById('gallery');
+    const gallery = byId('gallery');
     loadedCount = 0;
     poolExhausted = false;
     if (!items || items.length === 0) {
@@ -293,6 +305,11 @@ function renderGallery(items) {
     appendBatch();
 }
 
+/**
+ * @param {SearchItem} item
+ * @param {number} idx
+ * @returns {string}
+ */
 function cardHtml(item, idx) {
     const fname = item.image_path.split(/[\\/]/).pop();
     const imgSrc = `/image/${encodeURIComponent(fname)}`;
@@ -348,8 +365,8 @@ function cardHtml(item, idx) {
 }
 
 async function appendBatch() {
-    const gallery = document.getElementById('gallery');
-    const moreBtn = document.querySelector('#morewrap button');
+    const gallery = byId('gallery');
+    const moreBtn = /** @type {HTMLButtonElement|null} */ (document.querySelector('#morewrap button'));
     if (fetchingMore) return;   // 并发保护：哨兵与手动点击可能同时触发
     let next = currentResults.slice(loadedCount, loadedCount + BATCH);
     if (!next.length && !poolExhausted && loadedCount < MAX_RESULTS) {
@@ -410,8 +427,8 @@ async function appendBatch() {
 }
 
 function updateMoreBtn() {
-    const wrap = document.getElementById('morewrap');
-    const counter = document.getElementById('countnote');
+    const wrap = byId('morewrap');
+    const counter = byId('countnote');
     const canMore = !poolExhausted && loadedCount > 0 && loadedCount < MAX_RESULTS;
     if (wrap) wrap.style.display = canMore ? 'block' : 'none';
     if (counter) counter.textContent = loadedCount ? `已加载 ${loadedCount} 张匹配图表` : '';
@@ -419,7 +436,7 @@ function updateMoreBtn() {
 
 // 无限滚动：哨兵进入视口前 800px 即追加下一批；DOM 由 content-visibility 跳过屏外渲染
 (function setupInfiniteScroll() {
-    const sentinel = document.getElementById('sentinel');
+    const sentinel = byId('sentinel');
     if (!sentinel || !('IntersectionObserver' in window)) return;
     io = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting) appendBatch();
@@ -432,8 +449,8 @@ function openModal(idx) {
     if (!item) return;
     resetZoom();
     const fname = item.image_path.split(/[\\/]/).pop();
-    document.getElementById('modalImg').src = `/image/${encodeURIComponent(fname)}`;
-    document.getElementById('modalFigNo').innerText = `${item.fig_no} (PDF 第 ${item.page_no} 页)`;
+    byId('modalImg').src = `/image/${encodeURIComponent(fname)}`;
+    byId('modalFigNo').innerText = `${item.fig_no} (PDF 第 ${item.page_no} 页)`;
     // 元数据合并一行：作者 · 期刊全称（斜体）· 年份
     // 模态框横向空间充足，期刊优先全称；卡片窄栏仍用 journal_abbr
     // 期刊名走 <em>，故此处用 innerHTML：authors/venue 必须转义
@@ -443,22 +460,22 @@ function openModal(idx) {
     const venueFull = item.journal || item.journal_abbr || '';
     if (venueFull) metaBits.push('<em class="venue">' + esc(venueFull) + '</em>');
     if (item.year) metaBits.push(esc(String(item.year)));
-    document.getElementById('modalMeta').innerHTML = metaBits.join(' · ');
-    document.getElementById('modalTitle').innerText = item.title;
-    document.getElementById('modalCaption').innerText = item.caption;
-    const dlg = document.getElementById('imageModal');
+    byId('modalMeta').innerHTML = metaBits.join(' · ');
+    byId('modalTitle').innerText = item.title;
+    byId('modalCaption').innerText = item.caption;
+    const dlg = byId('imageModal');
     if (!dlg.open) dlg.showModal();
 }
 
 function closeModal(e) {
-    const dlg = document.getElementById('imageModal');
+    const dlg = byId('imageModal');
     // 点击遮罩时事件目标就是 <dialog> 本身；内容区已 stopPropagation
     if (e && e.type === 'click' && e.target !== dlg) return;
     if (dlg.open) dlg.close();
 }
 
 // 平台关闭（Esc / close()）后复位缩放，避免下次打开带着旧位移
-document.getElementById('imageModal').addEventListener('close', resetZoom);
+byId('imageModal').addEventListener('close', resetZoom);
 
 let zoomScale = 1;
 let panX = 0, panY = 0;
@@ -467,7 +484,7 @@ let startX = 0, startY = 0;
 let hasMoved = false;
 
 function updateTransform(smooth = false) {
-    const img = document.getElementById('modalImg');
+    const img = byId('modalImg');
     if (!img) return;
     img.style.transition = smooth ? 'transform 0.16s cubic-bezier(0.2, 0, 0.2, 1)' : 'none';
     if (zoomScale <= 1.01) {
@@ -493,7 +510,7 @@ function resetZoom() {
 
 (function setupZoom() {
     const container = document.querySelector('.modal-img-container');
-    const img = document.getElementById('modalImg');
+    const img = byId('modalImg');
     if (!container || !img) return;
 
     img.addEventListener('mousedown', (e) => {
@@ -538,8 +555,8 @@ function resetZoom() {
         }
     });
 
-    container.addEventListener('wheel', (e) => {
-        const modal = document.getElementById('imageModal');
+    container.addEventListener('wheel', /** @param {WheelEvent} e */ (e) => {
+        const modal = byId('imageModal');
         if (!modal || !modal.open) return;
         e.preventDefault();
         const factor = e.deltaY < 0 ? 1.25 : 0.8;
@@ -560,7 +577,7 @@ function resetZoom() {
 })();
 
 function showToast(msg, isError) {
-    const t = document.getElementById('toast');
+    const t = byId('toast');
     t.textContent = msg;
     t.style.background = isError ? '#be123c' : '#0284c7';
     t.classList.add('show');
@@ -568,13 +585,15 @@ function showToast(msg, isError) {
 }
 
 // ---- 索引进度：服务端 job 模型 + 1s 轮询（真实 done/total，不用批次号）----
+/** @type {number|null} */
 let jobTimer = null;
 
+/** @param {JobState} job */
 function renderJob(job) {
-    const bar = document.getElementById('jobBar');
-    const fill = document.getElementById('jobFill');
-    const text = document.getElementById('jobText');
-    const btn = document.getElementById('btnUpdate');
+    const bar = byId('jobBar');
+    const fill = byId('jobFill');
+    const text = byId('jobText');
+    const btn = byId('btnUpdate');
     if (!bar || !job) return;
     const total = job.total || 0;
     const done = job.done || 0;
@@ -600,6 +619,7 @@ function renderJob(job) {
     }
 }
 
+/** @param {string} jobId */
 async function pollJob(jobId) {
     try {
         const res = await fetch('/api/jobs/' + encodeURIComponent(jobId));
@@ -622,7 +642,7 @@ async function pollJob(jobId) {
 }
 
 async function triggerUpdate() {
-    const btn = document.getElementById('btnUpdate');
+    const btn = byId('btnUpdate');
     if (btn) btn.disabled = true;
     try {
         const res = await fetch('/api/jobs/index', { method: 'POST' });
@@ -653,7 +673,7 @@ async function triggerUpdate() {
 
 async function shutdownServer() {
     if (!confirm('确定要关停本地 zoteo-fig-db 图库服务吗？关停后网页将无法访问。')) return;
-    const btn = document.getElementById('btnShutdown');
+    const btn = byId('btnShutdown');
     if (btn) btn.innerHTML = '<span>⏳ 正在停止...</span>';
     try {
         await fetch('/api/shutdown', { method: 'POST' });
@@ -670,7 +690,7 @@ async function shutdownServer() {
 function openZoteroProtocol(e, url) {
     e.preventDefault();
     e.stopPropagation();
-    let ifr = document.getElementById('protocolIframe');
+    let ifr = byId('protocolIframe');
     if (!ifr) {
         ifr = document.createElement('iframe');
         ifr.id = 'protocolIframe';
@@ -738,14 +758,14 @@ function copyField(idx, field, btn, e) {
 loadStats();
 loadJournalOptions();
 loadPresets();
-document.getElementById('gallery').innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 60px 0;">输入关键词或点击上方快捷预设，开始语义检索图表</div>';
+byId('gallery').innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 60px 0;">输入关键词或点击上方快捷预设，开始语义检索图表</div>';
 
 fetch('/api/urls').then(r => r.json()).then(d => {
-    document.getElementById('addrbar').textContent = '访问地址：' + d.urls.join('　·　') + '　（本机用 127.0.0.1，跨设备用 overlay 恒定地址）';
+    byId('addrbar').textContent = '访问地址：' + d.urls.join('　·　') + '　（本机用 127.0.0.1，跨设备用 overlay 恒定地址）';
 }).catch(() => {});
 
 (function setupBackTop() {
-    const backTop = document.getElementById('backTop');
+    const backTop = byId('backTop');
     if (!backTop) return;
     const sync = () => backTop.classList.toggle('show', window.scrollY > 700);
     window.addEventListener('scroll', sync, { passive: true });
