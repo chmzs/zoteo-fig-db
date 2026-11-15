@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: py${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 语法检查
+        run: python -m py_compile server.py engine.py indexer.py presets.py config.py reembed.py reextract_affected.py backfill_thumbs.py dedupe_fig_no.py mcp_server.py
+
+      - name: 契约测试
+        run: python -m unittest discover -s tests -v
+
+      - name: 依赖可导入（打包前哨）
+        run: python -c "import fitz, onnxruntime, numpy, PIL, tokenizers; print('deps ok')"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 前端类型门
+        run: npx -y -p typescript@5 tsc --noEmit

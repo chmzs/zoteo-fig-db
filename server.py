@@ -159,9 +159,16 @@ class ZoteoFigHandler(BaseHTTPRequestHandler):
         probe["sqlite_ok"] = os.path.isfile(sqlite_path)
         if probe["sqlite_ok"]:
             try:
-                conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True, timeout=5)
+                # Zotero 运行时 SQLite 会锁库：timeout 必须短，否则配置页会转圈数秒
+                # （实测 timeout=5 让一次请求阻塞 7.3s）
+                conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True, timeout=1)
+                conn.execute("PRAGMA busy_timeout=800")
                 probe["item_count"] = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
                 conn.close()
+            except sqlite3.OperationalError as exc:
+                probe["item_count"] = None
+                probe["sqlite_note"] = ("被 Zotero 占用（正常，可忽略）"
+                                        if "locked" in str(exc).lower() else str(exc))
             except Exception:
                 probe["item_count"] = None
         storage_dir = values.get("storage_dir") or ""
