@@ -114,7 +114,24 @@ async function save() {
     if (data.status === 'ok') render(await (await fetch('/api/config')).json());
 }
 
-load();
+window.addEventListener('error', (ev) => {
+    const box = document.getElementById('probe');
+    if (box) box.textContent = '脚本错误：' + ev.message + ' @line ' + ev.lineno;
+});
+
+function bootstrap() {
+    load().catch((err) => {
+        document.getElementById('probe').textContent =
+            '加载失败：' + err + '（若提示 JSON 解析失败，多半是 /api/config 返回 500/404）';
+        document.getElementById('status').textContent = '加载失败';
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+    bootstrap();
+}
 </script>
 </body>
 </html>
