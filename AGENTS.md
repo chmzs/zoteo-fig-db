@@ -24,7 +24,7 @@ $PY reindex_all.py                         # 算法版本升级后全量重抽�
 $PY reindex_families.py all                # 族级/全库清场重提（版本升级正通道）
 $PY panel_qc.py --family elsevier --limit 50  # 面板灰度干跑 QC（只读，不写主库）
 $PY -m unittest discover -s tests -v        # 契约测试：家族路由/fig_no 归一/评分 sidecar/检索切片（改适配器或 engine 后必跑）
-npx -y -p typescript@5 tsc --noEmit        # 前端类型门（改 static/ 后必跑；npm 缓存须指向用户目录，见已知坑）
+npx -y -p typescript@5 tsc --noEmit        # 前端类型门（改 static/ 后必跑；缓存已在用户目录，无需环境变量）
 node --check static/app.js                  # 前端语法门（tsc 已覆盖，保留作快速自检）
 $PY reembed.py                              # 换模型/换量化/换池化后重算全库向量（逐条编码，16k 条约 18 分钟；跑完必须重启 server）
 $PY reembed.py --reset --batch 256          # 全库重算（忽略游标）
@@ -43,7 +43,7 @@ tail -20 cache/server.log                            # 排障入口：服务端 
 ## 已知坑（勿重踩）
 
 - `innerHTML +=` 重建节点 → 图片全部重新请求；用 `insertAdjacentHTML`
-- npm 默认缓存在 `D:\Program Files\nodejs\node_cache`（需管理员）→ 本机跑 npx 前必须 `export npm_config_cache=D:/Users/chmzs/AppData/Local/npm-cache`；项目内不装 node_modules，门禁用 `npx -y -p typescript@5 tsc`
+- npm 缓存已迁到 `D:\Users\chmzs\AppData\Local\npm-cache`（用户级 `.npmrc`，2026-11-15），不再需要 `npm_config_cache` 覆盖；`prefix` 仍是 `D:\Program Files\nodejs\node_global`（`npm i -g` 需管理员，**刻意不改**：全局装着 dsh 运行时、playwright-cli、pnpm 等 7 个包，迁移要整链重装）；项目内不装 node_modules，门禁直接 `npx -y -p typescript@5 tsc`
 - 前端类型检查是 `@ts-check` + JSDoc（`static/types.d.ts` 定义 SearchItem/JobState/Preset 契约），无构建步骤，`static/app.js` 仍是浏览器直接加载的产物；DOM 查询统一走 `byId()`（批量替换曾把它自己内部也替换成 `byId(id)` → 无限递归，改此处务必核对手写原生调用）
 - numpy 的 gemm 崩溃**已修复（2026-11-15）**：conda 版 numpy 走 MKL，而环境里同时有 `libiomp5md.dll` 与 `libomp.dll`（双 OpenMP 运行时冲突）→ `A @ B` 原生崩溃（exit 0xC06D007F，gemv 正常）。已 `pip install --force-reinstall --no-deps numpy==2.5.4`（PyPI cp315 轮子，自带 scipy-openblas 0.3.34，不依赖 MKL），gemm 恢复，pandas/matplotlib/xarray/fitz/onnxruntime 全部可导。**回滚**：`pixi global install --environment geo numpy`
 - granite 的 `tokenizer.json` 自带 `padding=BatchLongest` 与 `truncation=32768`：不调 `no_padding()` 会把整批补齐到最长一条（实测全变 1006 token），编码慢 6 倍
