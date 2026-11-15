@@ -122,6 +122,27 @@ class BaseAdapter:
             pass
         return out
 
+    @staticmethod
+    def _text_dominated(page, clip, ratio=0.55):
+        """裁剪框是否被正文文字块主导（防"整段正文被当图"）。
+
+        实测（2026-11-15, 9288GV6S p4）：题注选错后，向上 band 全是右栏正文段落；
+        该页有 954 条矢量路径，"题注上方有图形证据"的守卫被满足，于是产出纯文字假图卡。
+        图上正常带刻度/字母标注，文字面积占比远低于该阈值，不会误伤。
+        """
+        try:
+            blocks = page.get_text("blocks")
+        except Exception:
+            return False
+        text_area = 0.0
+        for blk in blocks:
+            if blk[6] != 0:          # 0 = text block
+                continue
+            overlap = fitz.Rect(blk[0], blk[1], blk[2], blk[3]) & clip
+            if overlap.is_valid:
+                text_area += overlap.get_area()
+        return text_area >= clip.get_area() * ratio
+
     def locate_figure_box(self, page: fitz.Page, cap_rect: fitz.Rect, valid_images: list,
                           page_drawings: list, text_spans: list = None,
                           all_captions: list = None) -> tuple:
@@ -188,8 +209,16 @@ class BaseAdapter:
             # 叠栏多图页会把上邻图的轴刻度并入 → pad 后统一回裁，越带部分判归上邻图
             if band.height >= 60:
                 clip = clip & band
+            if self._text_dominated(page, clip):
+                return None, None
             if clip.height < 60 or clip.width < 80:
-                return fitz.Rect(band.x0, max(64, band.y0), band.x1, band.y1), None
+                # 退化分支会返回整条 band：这里必须再过一次文字闸门。
+                # 9288GV6S p4 实测：并集只剩一条细横线（clip 高 <60）→ 闸门对细条判 0%，
+                # 于是把整条 band（74% 是正文）当图返回，产出纯文字假图卡。
+                fallback_band = fitz.Rect(band.x0, max(64, band.y0), band.x1, band.y1)
+                if self._text_dominated(page, fallback_band):
+                    return None, None
+                return fallback_band, None
             return clip, None
 
         # ---- 回退路径：题注在图上方（Wiley Accepted Article 等手稿式排版）----
@@ -741,7 +770,7 @@ class BaseAdapter:
         if len(cand_imgs) == 1 and not cand_dr:
             inter, vi = cand_imgs[0]
             # 位图基本被该侧完整容纳 → 直取原始字节（零重采样）
-            if inter.get_area() / max(1.0, vi["rect"].get_area()) >= 0.92:
+            if inter.get_area() / max(1.0, vi["rect"].get_area()) >= 0.75:
                 return None, vi
             clip = fitz.Rect(max(25, inter.x0 - 4), max(40, inter.y0 - 4),
                              min(page_rect.width - 25, inter.x1 + 4),

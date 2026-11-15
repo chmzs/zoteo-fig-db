@@ -511,6 +511,12 @@ class FigureExtractor:
 
         for page_idx in range(max_pages):
             page = doc[page_idx]
+            # 旋转页归一（2026-11-15 实测 J4BQQFL4 p5）：rotation≠0 时题注矩形来自
+            # page.rect（旋转后）空间，而位图 bbox 与 get_pixmap(clip) 用未旋转空间，
+            # 两套坐标混用 → 横向大图只裁到一半、竖排题注条混进图里。
+            # 统一归零后取几何；输出方向由"单幅位图直抽原始字节"保证。
+            if page.rotation:
+                page.set_rotation(0)
             # 毒页容错: MuPDF 图形栈超限(嵌套 Form XObject)整页不可遍历 -> 跳页不跳篇
             try:
                 captions_on_page = adapter.find_captions(page, page_idx)
