@@ -297,7 +297,8 @@ header {
     gap: 6px;
 }
 .btn-action {
-    flex: 1 1 45%;
+    flex: 1 1 30%;   /* 三列：两行放满 6 个按钮 */
+    min-width: 0;
     padding: 6px 8px;
     font-size: 12px;
     text-align: center;

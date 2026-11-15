@@ -61,7 +61,11 @@ def get_notes_map(force_refresh=False):
         try:
             with open(CACHE_JSON, "r", encoding="utf-8") as f:
                 cached = json.load(f)
-            if (now - cached.get("built_at", 0)) < 86400:  # daily refresh
+            # 缓存必须绑定构建时目录：配置页改了 notes_dir 后旧缓存会静默失效
+            # （2026-11-15 实测：用错误目录建了 2 条缓存，按钮整片消失且 24h 内不复原）
+            same_dir = (os.path.normcase(os.path.normpath(cached.get("notes_dir") or ""))
+                        == os.path.normcase(os.path.normpath(NOTES_DIR)))
+            if same_dir and (now - cached.get("built_at", 0)) < 86400:  # daily refresh
                 loaded = cached.get("map", {})
         except Exception:
             loaded = None
@@ -71,7 +75,8 @@ def get_notes_map(force_refresh=False):
         os.makedirs(os.path.dirname(CACHE_JSON), exist_ok=True)
         try:
             with open(CACHE_JSON, "w", encoding="utf-8") as f:
-                json.dump({"built_at": now, "map": loaded}, f, ensure_ascii=False)
+                json.dump({"built_at": now, "notes_dir": NOTES_DIR, "map": loaded},
+                          f, ensure_ascii=False)
         except Exception:
             pass
 
@@ -107,3 +112,27 @@ def clean_wikilink_alias(wikilink, correct_abbr):
         parts[-1] = " " + correct_abbr
         return mm.group(1) + ",".join(parts) + mm.group(3)
     return wikilink
+
+
+def obsidian_uri(item_key):
+    '''obsidian://open 链接：一键在 Obsidian 打开该文献笔记；无笔记返回空串。
+
+    file= 必须是 vault 相对路径（不含 .md），vault= 是 vault 目录名。
+    '''
+    info = get_notes_map().get(item_key)
+    if not info or not info.get("note_name"):
+        return ""
+    from urllib.parse import quote
+
+    note_name = info["note_name"]
+    rel = note_name
+    root = app_config.vault_root()
+    if root:
+        try:
+            rel = os.path.relpath(os.path.join(NOTES_DIR, note_name + ".md"), root)
+        except ValueError:
+            rel = note_name
+    rel = rel.replace("\\", "/")
+    if rel.lower().endswith(".md"):
+        rel = rel[:-3]
+    return f"obsidian://open?vault={quote(app_config.obsidian_vault())}&file={quote(rel)}"

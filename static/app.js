@@ -320,6 +320,19 @@ function cardHtml(item, idx) {
         ? `zotero://open-pdf/library/items/${item.att_key}?page=${item.page_no || 1}`
         : `zotero://select/library/items/${item.item_key}`;
 
+    // 原文网页：Zotero 的 url 字段（DOI 回退在入库侧拼好），没有就不显示
+    const webBtn = item.url
+        ? `<a class="btn-action" href="${esc(item.url)}" target="_blank" rel="noopener" title="打开原文网页（来自 Zotero 网址字段）">
+                    <span>🌐 原文网页</span>
+                </a>`
+        : '';
+    // 在 Obsidian 打开：obsidian://open 协议，file= 用 vault 相对路径
+    const noteBtn = item.obsidian_uri
+        ? `<a class="btn-action" href="${esc(item.obsidian_uri)}" title="在 Obsidian 中打开对应的文献笔记">
+                    <span>📝 在 Obsidian 打开</span>
+                </a>`
+        : '';
+
     const wikilinkBtn = item.wikilink
         ? `<button class="btn-action" onclick="copyField(${idx}, 'wikilink', this, event)" title="复制 Obsidian 双链: ${esc(item.wikilink)}">
                     <span>🔗 复制笔记双链</span>
@@ -351,6 +364,8 @@ function cardHtml(item, idx) {
                 <a class="btn-action btn-pdf" href="${openPdfUrl}" onclick="openZoteroProtocol(event, '${openPdfUrl}')" title="在 Zotero 中直接打开 PDF 并滚动到第 ${item.page_no} 页此图">
                     <span>📄 打开 PDF 到此图</span>
                 </a>
+                ${webBtn}
+                ${noteBtn}
                 ${wikilinkBtn}
                 <button class="btn-action" onclick="copyField(${idx}, 'imgembed', this, event)" title="复制可直接在 Obsidian 渲染的图片链接">
                     <span>🖼️ 复制图片嵌入</span>

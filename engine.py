@@ -318,6 +318,8 @@ class FigureDB:
             cursor.execute("ALTER TABLE figures ADD COLUMN origin TEXT DEFAULT 'whole';")
         if "authors_norm" not in _cols:
             cursor.execute("ALTER TABLE figures ADD COLUMN authors_norm TEXT DEFAULT '';")
+        if "url" not in _cols:
+            cursor.execute("ALTER TABLE figures ADD COLUMN url TEXT DEFAULT '';")
 
         # 缓存签名 MAX(indexed_at) 必走索引：无索引时全表扫带 384 维 embedding
         # blob（16k 行 ≈450ms），每次 search 开头都跑 → 检索固定 +0.45s。
@@ -347,9 +349,9 @@ class FigureDB:
         INSERT OR REPLACE INTO figures (
             item_key, att_key, title, year, journal, journal_abbr, authors, fig_no, caption, 
             context_text, image_path, page_no, embedding, 
-            indexed_at, extractor_version, panels_json, origin, authors_norm
+            indexed_at, extractor_version, panels_json, origin, authors_norm, url
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             record["item_key"],
             record.get("att_key", ""),
@@ -369,6 +371,7 @@ class FigureDB:
             record.get("panels_json"),
             record.get("origin", "whole"),
             record.get("authors_norm", ""),
+            record.get("url", ""),
         ))
         row_id = cursor.lastrowid
         cursor.execute("""
@@ -803,7 +806,7 @@ class FigureSearcher:
 
     def _load_row(self, r):
         (r_id, item_key, att_key, title, year, journal, journal_abbr, authors, fig_no,
-         caption, ctx, img_path, page_no, emb_blob, origin, panels_json, authors_norm) = r
+         caption, ctx, img_path, page_no, emb_blob, origin, panels_json, authors_norm, url) = r
         emb = np.frombuffer(emb_blob, dtype=np.float32) if emb_blob else np.zeros(EMB_DIM, dtype=np.float32)
         thumb_name = ""
         if img_path and img_path.lower().endswith(".webp"):
@@ -824,6 +827,7 @@ class FigureSearcher:
             "context_text": ctx,
             "image_path": img_path,
             "thumb_name": thumb_name,
+            "url": url or "",
             "page_no": page_no,
             "origin": origin or "whole",
             "panels_json": panels_json or "",
@@ -837,7 +841,7 @@ class FigureSearcher:
         return emb, meta
 
     _COLS = ("SELECT id, item_key, att_key, title, year, journal, journal_abbr, authors, fig_no, caption, "
-             "context_text, image_path, page_no, embedding, origin, panels_json, authors_norm FROM figures")
+             "context_text, image_path, page_no, embedding, origin, panels_json, authors_norm, url FROM figures")
 
     def _ensure_cache(self):
         # 并发保护：warm_caches 线程与请求线程可能同时进入，缺少锁会双重追加
@@ -967,7 +971,7 @@ class FigureSearcher:
         if self._M is None or len(self._metas) == 0:
             return []
 
-        from notes_index import clean_wikilink_alias, make_wikilink
+        from notes_index import clean_wikilink_alias, make_wikilink, obsidian_uri
 
         jf = journal_filter.lower() if journal_filter else None
         jexact = bool(journal_exact)
@@ -1080,6 +1084,7 @@ class FigureSearcher:
             seen.add(m["_dedup"])
             wikilink, link_kind = make_wikilink(m["item_key"], m["title"])
             wikilink = clean_wikilink_alias(wikilink, m.get("journal_abbr") or "")
+            note_uri = obsidian_uri(m["item_key"])
             authors_str = m.get("authors", "") or _display_authors(m.get("author_first", ""), m.get("author_last", ""))
             results.append({
                 "id": m["id"],
@@ -1098,6 +1103,8 @@ class FigureSearcher:
                 "page_no": m["page_no"],
                 "origin": m.get("origin") or "whole",
                 "panels_json": m.get("panels_json") or "",
+                "url": m.get("url") or "",
+                "obsidian_uri": note_uri,
                 "wikilink": wikilink,
                 "link_kind": link_kind,
                 "score": round(final_score, 4),

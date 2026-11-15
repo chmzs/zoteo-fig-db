@@ -184,3 +184,22 @@ def notes_dir():
 
 def port():
     return int(load()["port"])
+
+
+def vault_root():
+    '''从 notes_dir 向上找含 .obsidian 的目录 = Obsidian vault 根；找不到返回空串。'''
+    path = notes_dir()
+    while path and len(path) > 3:
+        if os.path.isdir(os.path.join(path, ".obsidian")):
+            return path
+        parent = os.path.dirname(path.rstrip("\\/"))
+        if parent == path:
+            break
+        path = parent
+    return ""
+
+
+def obsidian_vault():
+    '''vault 名称（obsidian://open?vault=<name> 用）。'''
+    root = vault_root()
+    return os.path.basename(root) if root else ""
