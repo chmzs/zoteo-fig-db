@@ -179,6 +179,16 @@ def resolve_abbr(journal, zot_abbr=""):
     return journal_abbr_str(j)
 
 
+def _iou(a, b):
+    """两个矩形框的交并比。同页去重用：同图被 "Fig. 3" 与 "Figure 3" 两条题注各收一次时判定重复。"""
+    inter = a & b
+    if not inter.is_valid:
+        return 0.0
+    inter_area = inter.get_area()
+    union = a.get_area() + b.get_area() - inter_area
+    return inter_area / max(1.0, union)
+
+
 def _so():
     so = ort.SessionOptions()
     # granite-97m INT8 在 8 核实测最优：短文本 4 线程快，长题注批处理 8 线程快
@@ -553,6 +563,9 @@ class FigureExtractor:
             except Exception:
                 page_drawings = []
 
+            # 同页已收下的图框：fig_no 拼写漂移（Fig. 3 / Figure 3 / FIGURE 1）会让同一张图被
+            # 两条题注各收一次，产出重复行（2026-11-15 实测 9288GV6S 与 CIF7AD5F）。
+            accepted_boxes = []
             for cap in captions_on_page:
                 # 书目录点线行（"图21 xxx 41 ......"）不可能是真题注：≥4 连点即拒
                 if re.search(r"[.…·]{4,}", cap["caption"]):
@@ -570,6 +583,11 @@ class FigureExtractor:
                     text_spans=None,
                     all_captions=captions_on_page,
                 )
+
+                region_box = clip_rect if clip_rect is not None else (
+                    matched_raster["rect"] if matched_raster else None)
+                if region_box is not None and any(_iou(region_box, prev) >= 0.6 for prev in accepted_boxes):
+                    continue   # 区域已被同页前一条题注收走 → 判为同一张图的重拼写
 
                 saved = False
                 if matched_raster:
@@ -593,6 +611,9 @@ class FigureExtractor:
                         saved = True
                     except Exception:
                         pass
+
+                if saved and region_box is not None:
+                    accepted_boxes.append(region_box)
 
                 thumb_name = ""
                 if saved:
