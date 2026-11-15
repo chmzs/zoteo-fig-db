@@ -49,9 +49,25 @@ def main():
         "SELECT id, item_key, fig_no, COALESCE(caption,''), image_path, page_no FROM figures"
         " ORDER BY item_key, page_no").fetchall()
 
+    # 只把"页码相邻（差<=2）"的行视为同一张图：教材/报告按章编号时，
+    # 不同章节的 "Figure 2" 是两张不同的图（实测 9EXZZYYV p9 与 p62）。
     groups = {}
     for row in rows:
         groups.setdefault((row[1], norm_fig(row[2])), []).append(row)
+
+    clustered = {}
+    for key, members in groups.items():
+        members.sort(key=lambda r: r[5] or 0)
+        cluster = []
+        for row in members:
+            if cluster and (row[5] or 0) - (cluster[-1][5] or 0) > 2:
+                if len(cluster) > 1:
+                    clustered[(key[0], key[1], cluster[0][5])] = list(cluster)
+                cluster = []
+            cluster.append(row)
+        if len(cluster) > 1:
+            clustered[(key[0], key[1], cluster[0][5])] = cluster
+    groups = clustered
 
     dup_groups = {k: v for k, v in groups.items() if len(v) > 1}
     total_extra = sum(len(v) - 1 for v in dup_groups.values())
@@ -59,7 +75,7 @@ def main():
 
     removed = 0
     freed = 0
-    for (item_key, norm), members in sorted(dup_groups.items(), key=lambda kv: -len(kv[1]))[:12]:
+    for (item_key, norm, _page), members in sorted(dup_groups.items(), key=lambda kv: -len(kv[1]))[:12]:
         ranked = sorted(members, key=lambda r: (
             bool(BODY_STYLE.match(r[3])),          # 正文句式排后
             -len(r[3]),                            # 题注长的优先
@@ -73,7 +89,7 @@ def main():
         conn.close()
         return
 
-    for (item_key, norm), members in dup_groups.items():
+    for (_item_key, _norm, _page), members in dup_groups.items():
         ranked = sorted(members, key=lambda r: (
             bool(BODY_STYLE.match(r[3])), -len(r[3]), -area_of(r[4] or ""), r[5] or 0))
         keep = ranked[0]
