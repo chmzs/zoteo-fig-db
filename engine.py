@@ -179,6 +179,12 @@ def resolve_abbr(journal, zot_abbr=""):
     return journal_abbr_str(j)
 
 
+# "Fig. 3 continued." / "Figure 1. (continued)"：题注跨页，本页只是续行，真题注在前页同号题注处
+# （2026-11-15 实测：764 行短题注里绝大多数属此类）
+CONTINUED_RE = re.compile(
+    r"^(?:Fig(?:ure)?\.?)\s*\d+[a-z]?\s*[.:]?\s*\(?\s*continued\s*\)?\.?$", re.I)
+
+
 def _iou(a, b):
     """两个矩形框的交并比。同页去重用：同图被 "Fig. 3" 与 "Figure 3" 两条题注各收一次时判定重复。"""
     inter = a & b
@@ -519,6 +525,8 @@ class FigureExtractor:
 
         results = []
 
+        # 同号题注的首次完整原文：续行题注回填用
+        seen_caption = {}
         for page_idx in range(max_pages):
             page = doc[page_idx]
             # 旋转页归一（2026-11-15 实测 J4BQQFL4 p5）：rotation≠0 时题注矩形来自
@@ -565,11 +573,24 @@ class FigureExtractor:
 
             # 同页已收下的图框：fig_no 拼写漂移（Fig. 3 / Figure 3 / FIGURE 1）会让同一张图被
             # 两条题注各收一次，产出重复行（2026-11-15 实测 9288GV6S 与 CIF7AD5F）。
+            for cap0 in captions_on_page:
+                key0 = re.sub(r"[^0-9a-z]", "", (cap0["fig_no"] or "").lower())
+                if key0 and not CONTINUED_RE.match((cap0["caption"] or "").strip()):
+                    seen_caption.setdefault(key0, (cap0["caption"] or "").strip())
+
             accepted_boxes = []
             for cap in captions_on_page:
                 # 书目录点线行（"图21 xxx 41 ......"）不可能是真题注：≥4 连点即拒
                 if re.search(r"[.…·]{4,}", cap["caption"]):
                     continue
+                # 续行题注回填：用前页同号题注的完整原文，别让 "Fig. 3 continued." 直接入库
+                norm_key = re.sub(r"[^0-9a-z]", "", (cap["fig_no"] or "").lower())
+                cap_caption = cap["caption"]
+                fig_no_out = cap["fig_no"]
+                if CONTINUED_RE.match((cap_caption or "").strip()) and seen_caption.get(norm_key):
+                    cap_caption = seen_caption[norm_key] + " (continued)"
+                    # 跨页图的后半段与前半段同号：加后缀保持唯一，也让人看得懂这是续页半幅
+                    fig_no_out = cap["fig_no"].strip() + " (cont.)"
                 fig_no_clean = re.sub(r"[^\w\d]", "_", cap["fig_no"])
                 webp_filename = f"{item_key}_{fig_no_clean}_p{page_idx+1}.webp"
                 webp_path = os.path.join(self.output_dir, webp_filename)
@@ -626,8 +647,8 @@ class FigureExtractor:
                         "title": title,
                         "year": year,
                         "journal": journal,
-                        "fig_no": cap["fig_no"],
-                        "caption": cap["caption"],
+                        "fig_no": fig_no_out,
+                        "caption": cap_caption,
                         "context_text": "",
                         "image_path": webp_path,
                         "thumb_name": thumb_name,
