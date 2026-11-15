@@ -5,7 +5,7 @@ Zotero GeoFigure Engine (fig_db)
 - Precise bounding box detection via vector drawings + raster images (Zero text pollution)
 - Bilingual Caption Merging (Chinese '图 N' + English 'Fig. N')
 - High-Quality WebP (quality=85) Storage
-- e5-small INT8 Embedding & SQLite FTS5 Hybrid Search
+- granite-embedding-97m-r2 INT8 Embedding & SQLite FTS5 Hybrid Search
 """
 
 import io
@@ -24,7 +24,20 @@ from PIL import Image
 from adapters import get_adapter
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(BASE_DIR, "models", "multilingual-e5-small")
+# 模型：granite-embedding-97m-multilingual-r2（97M / 384 维 / Apache-2.0）
+# 相比 multilingual-e5-small：多语言 MTEB Retrieval 50.9 → 60.3，ONNX INT8 112.8 → 93.7MB。
+# 三个必须一起改的差异（改了模型不改这些会崩或静默掉分）：
+#   1. 池化：granite 用 CLS，e5 用 mean（见 1_Pooling/config.json）
+#   2. 前缀：granite 的 prompts 为空，e5 必须加 "query: " / "passage: "
+#   3. 输入：granite 的 ONNX 没有 token_type_ids
+MODEL_DIR = os.path.join(BASE_DIR, "models", "granite-97m-r2")
+EMB_DIM = 384
+QUERY_PREFIX = ""
+PASSAGE_PREFIX = ""
+POOLING = "cls"          # "cls" | "mean"
+# 题注真实长度：mean 97 / p50 70 / p90 211 / p95 271 / p99 403 / max 1006（granite 分词）
+# 256 截掉 5.9%，384 截 1.3%。取 256：算力与覆盖的平衡点（2026-11-15 实测）
+TRUNCATE_TOKENS = 256
 DB_PATH = os.path.join(BASE_DIR, "zotero-figures.sqlite")
 IMAGE_DIR = os.path.join(BASE_DIR, "cache", "figures")
 # 检索缓存构建锁：warm_caches 线程与 HTTP 请求线程会并发进入 _ensure_cache，
@@ -168,48 +181,72 @@ def resolve_abbr(journal, zot_abbr=""):
 
 def _so():
     so = ort.SessionOptions()
-    so.intra_op_num_threads = 2
+    # granite-97m INT8 在 8 核实测最优：短文本 4 线程快，长题注批处理 8 线程快
+    # （cap256 批处理：4 线程 5.8 条/秒 vs 8 线程 7.5 条/秒；单条查询 4→8 线程仅 +10ms）
+    so.intra_op_num_threads = int(os.environ.get("GEO_ORT_THREADS", "8"))
     so.inter_op_num_threads = 1
     return so
 
 
 class Encoder:
-    """multilingual-e5-small INT8（118MB，MIT）：mean pooling + L2；query/passage 前缀。
-    中英文/跨语言统一空间；换模型只改本类与 MODEL_DIR，调用点名字稳定。"""
+    """granite-embedding-97m-multilingual-r2 INT8（93.7MB，Apache-2.0）：CLS pooling + L2，无前缀。
+    与旧模型 multilingual-e5-small 的三处差异（改错会崩或静默掉分）：
+    CLS 而非 mean、无 "query: "/"passage: " 前缀、tokenizer.json 自带 padding 必须关掉。"""
 
     def __init__(self, model_dir=MODEL_DIR):
         from tokenizers import Tokenizer
         self.tok = Tokenizer.from_file(os.path.join(model_dir, "tokenizer.json"))
-        self.tok.enable_truncation(256)
+        # granite 的 tokenizer.json 自带 padding=BatchLongest + truncation=32768。
+        # 不清掉 padding，整批会被补齐到最长一条（实测全部变成 1006 token），
+        # 分桶失效且算力浪费 6 倍——这是 434ms/条 的真因（2026-11-15 实测）。
+        self.tok.no_padding()
+        self.tok.enable_truncation(TRUNCATE_TOKENS)
         self.session = ort.InferenceSession(
             os.path.join(model_dir, "model_int8.onnx"),
             sess_options=_so(),
             providers=["CPUExecutionProvider"],
         )
+        # 不同导出的 ONNX 输入集不同（e5 有 token_type_ids，granite 没有），按实际输入喂
+        self._input_names = {item.name for item in self.session.get_inputs()}
 
     def _vec(self, text, prefix):
         if not text or not text.strip():
-            return np.zeros(384, dtype=np.float32)
+            return np.zeros(EMB_DIM, dtype=np.float32)
         enc = self.tok.encode(prefix + text)
         ids = np.array([enc.ids], dtype=np.int64)
         mask = np.ones_like(ids)
-        outputs = self.session.run(None, {
-            "input_ids": ids,
-            "attention_mask": mask,
-            "token_type_ids": np.zeros_like(ids),
-        })
-        m = mask[..., np.newaxis].astype(np.float32)
-        embedding = (outputs[0] * m).sum(axis=1) / np.clip(m.sum(axis=1), a_min=1e-9, a_max=None)
+        feeds = {"input_ids": ids, "attention_mask": mask}
+        if "token_type_ids" in self._input_names:
+            feeds["token_type_ids"] = np.zeros_like(ids)
+        outputs = self.session.run(None, feeds)
+        if POOLING == "cls":
+            embedding = outputs[0][:, 0, :]
+        else:
+            m = mask[..., np.newaxis].astype(np.float32)
+            embedding = (outputs[0] * m).sum(axis=1) / np.clip(m.sum(axis=1), a_min=1e-9, a_max=None)
         norm = np.linalg.norm(embedding, axis=1, keepdims=True)
         if norm[0, 0] > 0:
             embedding = embedding / norm
         return embedding[0].astype(np.float32)
 
+    def encode_batch(self, texts, prefix=PASSAGE_PREFIX, batch_size=64):
+        """编码一批文本。batch_size 仅为签名兼容，实际逐条编码（原因见下方注释）。"""
+        out = np.zeros((len(texts), EMB_DIM), dtype=np.float32)
+        if not texts:
+            return out
+        # 逐条编码，禁止成批补齐：granite 的 quint8 导出对 padding/batch 组成不稳健——
+        # 同一文本单独编码与"带 mask 补齐进批"余弦仅 0.958，被补齐的短文掉到 0.85（2026-11-15 实测）。
+        # 逐条反而更快（27ms/条 = 37 条/秒；成批走 padding 只有 3-10 条/秒），且因 query 侧
+        # 本来就是单条，doc 与 query 才能落在同一数值子空间。单条编码确定性 = 1.000000。
+        for index, text in enumerate(texts):
+            out[index] = self._vec(text, prefix)
+        return out
+
     def encode(self, text):
-        return self._vec(text, "passage: ")
+        return self._vec(text, PASSAGE_PREFIX)
 
     def encode_query(self, text):
-        return self._vec(text, "query: ")
+        return self._vec(text, QUERY_PREFIX)
 
 
 
@@ -635,7 +672,7 @@ class FigureExtractor:
 class FigureSearcher:
     """Hybrid two-stage search with numpy matrix cache for large libraries (10k+ figures).
 
-    Stage 1: e5 cosine similarity via single BLAS matmul over cached matrix
+    Stage 1: granite-embedding cosine similarity via single BLAS matmul over cached matrix
              + FTS5 keyword recall (OR of query terms) to catch exact phrases.
     Stage 2: Keyword-bonus reranking only on the merged candidate set (~top 400).
     """
@@ -689,7 +726,7 @@ class FigureSearcher:
     def _load_row(self, r):
         (r_id, item_key, att_key, title, year, journal, journal_abbr, authors, fig_no,
          caption, ctx, img_path, page_no, emb_blob, origin, panels_json, authors_norm) = r
-        emb = np.frombuffer(emb_blob, dtype=np.float32) if emb_blob else np.zeros(384, dtype=np.float32)
+        emb = np.frombuffer(emb_blob, dtype=np.float32) if emb_blob else np.zeros(EMB_DIM, dtype=np.float32)
         thumb_name = ""
         if img_path and img_path.lower().endswith(".webp"):
             cand = img_path[:-5] + ".thumb.webp"
@@ -787,7 +824,7 @@ class FigureSearcher:
         conn.close()
 
         if not rows:
-            self._M = np.zeros((0, 384), dtype=np.float32)
+            self._M = np.zeros((0, EMB_DIM), dtype=np.float32)
             self._metas, self._id2idx, self._sig = [], {}, sig
             return
 
@@ -888,7 +925,10 @@ class FigureSearcher:
             sims = self._M @ q_emb
             # pool 夹到 n：offset 极大时 (top_k+offset)*10 超过 n，
             # 会让 np.argpartition 的 kth 越界抛 ValueError（2026-10-28 审计发现）
-            pool = min(n, int(max(200, (top_k + offset) * 10)))
+            # 候选池：原先 200 太小——granite 的余弦区间窄（0.79–0.80），仅靠前 200 名
+            # 重排会漏掉大量真值；实测同一查询集 Recall@10 由 0.440 升到 0.634（2026-11-15）。
+            # 16k×384 的 argpartition 只花 ~1ms，池放大到 1000 的代价可忽略。
+            pool = min(n, int(max(1000, (top_k + offset) * 10)))
             if n <= pool:
                 cand_idx = list(range(n))
             else:
