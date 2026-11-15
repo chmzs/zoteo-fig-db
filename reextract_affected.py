@@ -7,8 +7,11 @@
 **顺序铁律**：remove_item 会删除 DB 行与图片文件，必须先删后抽。
 
 判据（任一命中即重抽）：
-  A. 该篇任一张图所在页面 rotation != 0
-  B. 该篇任一张图是竖长条（高 > 1.6×宽）——单栏文字块的典型形状
+  A. 该篇任一张图所在页面 rotation != 0（旋转页裁偏）
+  B. 该篇任一条题注是"正文句式"（编号后无句点、紧跟 shows/presents/plots 等）
+     —— 这类题注会把正文段落当图体。
+注：试过"竖长条（高>1.6×宽）"判据，抽查两张均为合法竖图（5 面板柱状图、三阶段概念图），
+已作废——形状不能当缺陷判据，只能当人工筛查信号。
 
 用法：python reextract_affected.py [--limit N] [--reset]
 可续跑：游标存 cache/reextract_state.json。跑完需删 cache/embed_* 并重启 server。
@@ -24,8 +27,17 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import re
+
 import fitz
 from PIL import Image
+
+BODY_STYLE = re.compile(
+    r"^(?:Fig(?:ure)?\.?)\s*\d+[a-z]?\s+"
+    # 不含 plot/plots："Fig. 5 Plot showing ..." 是合法题注写法（2A3J2WW9 实测误判）
+    r"(shows|show|presents|present|illustrates|illustrate|displays|display|depicts|depict|indicates|indicate|summariz|summaris)",
+    re.I,
+)
 
 from engine import DB_PATH, Encoder, FigureDB, FigureExtractor
 
@@ -89,18 +101,19 @@ def main():
             continue
         title, year, journal, abbr, authors, anorm, ctx = row
         rows = conn.execute(
-            "SELECT page_no, image_path FROM figures WHERE item_key=?", (item_key,)).fetchall()
+            "SELECT page_no, image_path, COALESCE(caption,'') FROM figures WHERE item_key=?",
+            (item_key,)).fetchall()
         pages = [r[0] for r in rows if r[0]]
-        strips = sum(1 for r in rows if r[1] and is_strip(r[1]))
+        body_style = sum(1 for r in rows if BODY_STYLE.match(r[2]))
         pdfs = glob.glob(os.path.join("D:/Zotero/storage", att_key or "", "*.pdf"))
         rotated = has_rotated_page(pdfs[0], pages) if pdfs else False
 
-        if not (rotated or strips):
+        if not (rotated or body_style):
             continue
 
         affected += 1
         before_rows = len(rows)
-        before_strips = strips
+        before_strips = body_style
         if not pdfs:
             print(f"  [skip] {item_key} 无 PDF")
             continue
@@ -115,11 +128,11 @@ def main():
             fig["context_text"] = ctx or ""
             fig["authors_norm"] = anorm or ""
             db.insert_figure(fig)
-        after_strips = sum(1 for f in figs if is_strip(f["image_path"]))
+        after_strips = sum(1 for f in figs if BODY_STYLE.match(f.get("caption") or ""))
         missing = sum(1 for f in figs if not os.path.exists(f["image_path"]))
-        flag = "旋转" if rotated else ""
+        flag = ("旋转" if rotated else "") + ("+正文题注" if body_style else "")
         print(f"  {item_key:10s} {flag:2s} rows {before_rows}->{len(figs)}  "
-              f"strip {before_strips}->{after_strips}  missing={missing}  {str(journal)[:30]}", flush=True)
+              f"正文题注 {before_strips}->{after_strips}  missing={missing}  {str(journal)[:30]}", flush=True)
 
     cursor += len(window)
     with open(STATE_PATH, "w", encoding="utf-8") as state_file:

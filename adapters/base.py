@@ -123,25 +123,40 @@ class BaseAdapter:
         return out
 
     @staticmethod
-    def _text_dominated(page, clip, ratio=0.55):
-        """裁剪框是否被正文文字块主导（防"整段正文被当图"）。
+    def _text_dominated(page, clip, ratio=0.40, max_size_stdev=1.5):
+        """裁剪框是否被"正文段落"主导（防整段正文被当图）。
 
-        实测（2026-11-15, 9288GV6S p4）：题注选错后，向上 band 全是右栏正文段落；
-        该页有 954 条矢量路径，"题注上方有图形证据"的守卫被满足，于是产出纯文字假图卡。
-        图上正常带刻度/字母标注，文字面积占比远低于该阈值，不会误伤。
+        判据不是"文字多"，而是"版面是等字号多行段落"——因为有些合法图就是文字组成的：
+        实测 CIF7AD5F Fig.1 是 R 包名词云（rgdal/sp/raster…），按体积算文字占比 0.60，
+        旧闸门会误杀；词云的字号差异极大，正文段落则高度一致。
+
+        判定：框内占比最大的文字块 ≥ ratio，且行数 ≥3，且字号标准差 < max_size_stdev。
+        9288GV6S p4：右栏正文块占框 0.51、335pt 高、9pt 等字号 → 拦下（正确）。
         """
         try:
-            blocks = page.get_text("blocks")
+            raw = page.get_text("dict")
         except Exception:
             return False
-        text_area = 0.0
-        for blk in blocks:
-            if blk[6] != 0:          # 0 = text block
+        best = None
+        for blk in raw.get("blocks", []):
+            if blk.get("type") != 0:
                 continue
-            overlap = fitz.Rect(blk[0], blk[1], blk[2], blk[3]) & clip
-            if overlap.is_valid:
-                text_area += overlap.get_area()
-        return text_area >= clip.get_area() * ratio
+            inter = fitz.Rect(blk["bbox"]) & clip
+            if not inter.is_valid:
+                continue
+            lines = blk.get("lines", [])
+            sizes = [span.get("size", 0.0) for line in lines for span in line.get("spans", [])]
+            if len(lines) < 3 or not sizes:
+                continue
+            area_ratio = inter.get_area() / max(clip.get_area(), 1.0)
+            if best is None or area_ratio > best[0]:
+                best = (area_ratio, sizes)
+        if best is None:
+            return False
+        area_ratio, sizes = best
+        mean = sum(sizes) / len(sizes)
+        stdev = (sum((s - mean) ** 2 for s in sizes) / len(sizes)) ** 0.5
+        return area_ratio >= ratio and stdev < max_size_stdev
 
     def locate_figure_box(self, page: fitz.Page, cap_rect: fitz.Rect, valid_images: list,
                           page_drawings: list, text_spans: list = None,
