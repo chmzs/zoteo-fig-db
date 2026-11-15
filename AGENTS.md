@@ -6,12 +6,12 @@
 
 ## 不变量（改动前必读）
 
-1. **图↔题注契约**：一切检索基于题注文本（e5-small）+ FTS5。定位原则**宁宽勿裁，但绝不盲裁**——`adapters/base.locate_figure_box`：位图单幅直抽原始字节；矢量取路径∪位图∪6pt 内文本标注并集；**题注上方无图形证据→拒绝该候选**（防正文交叉引用/合并块假题注，2026-10-16 实测教训：Elsevier 双栏"图注并入正文块+整栏盲裁"会产出纯文字假图卡）。**面板行（v2.1, origin='panel'）同受此契约**：标签路线须严格 R×C 网格且每格有图形证据；位图路线几何块数必须==题注声明面板数且字母自 'a' 连续，否则整组拒切。一键回退 `DELETE FROM figures WHERE origin='panel'`（2026-10-19 演练通过）。
+1. **图↔题注契约**：一切检索基于题注文本（granite-embedding-97m-multilingual-r2 INT8，384 维，CLS 池化，无前缀）+ FTS5。定位原则**宁宽勿裁，但绝不盲裁**——`adapters/base.locate_figure_box`：位图单幅直抽原始字节；矢量取路径∪位图∪6pt 内文本标注并集；**题注上方无图形证据→拒绝该候选**（防正文交叉引用/合并块假题注，2026-10-16 实测教训：Elsevier 双栏"图注并入正文块+整栏盲裁"会产出纯文字假图卡）。**面板行（v2.1, origin='panel'）同受此契约**：标签路线须严格 R×C 网格且每格有图形证据；位图路线几何块数必须==题注声明面板数且字母自 'a' 连续，否则整组拒切。一键回退 `DELETE FROM figures WHERE origin='panel'`（2026-10-19 演练通过）。
 2. **路由只认刊名**：`adapters/__init__.get_adapter(journal, doc)`，期刊条目 publisher 字段 83% 为空，禁止依赖。家族归属以 `family_rules.py`（JOURNAL_RULES/EXACT_FAMILY/journal_family）为**单一事实源**，batch_master 调度与适配器路由共用；特化家族（chinese/nature/elsevier/agu/plos）match() 判 `journal_family()==本族` + 关键词，其余走 generic。elsevier/agu 的 find_captions **直接继承 base 超集+行级救援**（句式无真实差异就不写特化正则，防窄化漏配）；nature 保留 pipe 句式特化+空则 super 兜底。新增家族=改 family_rules + 视句法证据加家族文件，`engine.py` 零改动。
 3. **单写者**：worker/master 串行写 sqlite；画廊 server 只读。矩阵缓存签名 `(count, MAX(indexed_at), MAX(id))` 自动失效；UPDATE 元数据列需连带 bump indexed_at 或删除 `cache/embed_*`。
 4. **去重**：DB `UNIQUE(item_key, fig_no)` + 检索侧 (title,fig_no) 去重；多条目同题（预印本/正式版并存）由后者兜住。
 5. **简称链**：`notes_index.zot_abbr_plausible` 校验字段值（首字母子序列/词前缀），孤证怪值不可采信；中文刊保持原名；单词刊不加点。
-6. **服务生命周期**：`/api/shutdown` 写 `.manual_stop`（看门狗尊重），`启动 zoteo-fig-db.bat` 清标记；看门狗带 `NO_BROWSER=1`，用户手动启动才弹浏览器。
+6. **服务生命周期**：`/api/shutdown` 写 `.manual_stop`（看门狗尊重），`启动 zoteo-fig-db.bat` 清标记；看门狗带 `NO_BROWSER=1`，用户手动启动才弹浏览器。**手动重启必须先 `rm -f .manual_stop`**——直接跑 `watchdog.py` 时它见到该标记就静默 return，端口保持 000、无任何输出（bat 内含 del，走 bat 不踩）。
 
 ## 常用操作
 
@@ -23,7 +23,18 @@ $PY batch_master.py                        # 全库分批（断点续跑：batch
 $PY reindex_all.py                         # 算法版本升级后全量重抽（limit=400 缺陷：仅前 400 篇，其余静默留旧行）
 $PY reindex_families.py all                # 族级/全库清场重提（版本升级正通道）
 $PY panel_qc.py --family elsevier --limit 50  # 面板灰度干跑 QC（只读，不写主库）
+$PY -m unittest discover -s tests -v        # 契约测试：家族路由/fig_no 归一/评分 sidecar/检索切片（改适配器或 engine 后必跑）
+node --check static/app.js                  # 前端语法门（改 static/ 后必跑）
+$PY reembed.py                              # 换模型/换量化/换池化后重算全库向量（逐条编码，16k 条约 18 分钟；跑完必须重启 server）
+$PY reembed.py --reset --batch 256          # 全库重算（忽略游标）
+$PY backfill_thumbs.py                      # 回填历史缩略图（只补缺失，可重入；卡片带宽 −75%）
 NO_BROWSER=1 $PY server.py                 # 画廊（默认 5173，0.0.0.0 局域网可达）
+
+# 服务重启（顺序不可换；漏 rm 会静默不起，无任何报错）
+curl -s -X POST http://127.0.0.1:5173/api/shutdown   # 关 5173 + 联动杀 23122，并写 .manual_stop
+rm -f .manual_stop                                   # 必须删：watchdog.py 见标记即 return
+$PY -u watchdog.py                                   # 拉起 5173 + 23122（NO_BROWSER=1 不弹浏览器）
+tail -20 cache/server.log                            # 排障入口：服务端 500 落盘于此
 ```
 
 夜间批次 QC 判据（batch.log 每行 OK 记录）：`zero/papers>40%` 或 `extreme` 异常 → 查该家族 `batch_tmp/<fam>_<i>.papers.jsonl` 与 quarantine，必要时改适配器后 `DELETE FROM figures WHERE item_key IN(该家族)` 重跑。
@@ -31,6 +42,12 @@ NO_BROWSER=1 $PY server.py                 # 画廊（默认 5173，0.0.0.0 局�
 ## 已知坑（勿重踩）
 
 - `innerHTML +=` 重建节点 → 图片全部重新请求；用 `insertAdjacentHTML`
+- numpy 的 gemm 崩溃**已修复（2026-11-15）**：conda 版 numpy 走 MKL，而环境里同时有 `libiomp5md.dll` 与 `libomp.dll`（双 OpenMP 运行时冲突）→ `A @ B` 原生崩溃（exit 0xC06D007F，gemv 正常）。已 `pip install --force-reinstall --no-deps numpy==2.5.4`（PyPI cp315 轮子，自带 scipy-openblas 0.3.34，不依赖 MKL），gemm 恢复，pandas/matplotlib/xarray/fitz/onnxruntime 全部可导。**回滚**：`pixi global install --environment geo numpy`
+- granite 的 `tokenizer.json` 自带 `padding=BatchLongest` 与 `truncation=32768`：不调 `no_padding()` 会把整批补齐到最长一条（实测全变 1006 token），编码慢 6 倍
+- **granite quint8 对 batch 组成不稳健**：同一文本单独编码 vs 带 mask 补齐进批，余弦仅 0.958；被补齐的短文掉到 0.85。因此 `Encoder.encode_batch` 逐条编码（27ms/条=37 条/秒，反而比成批快），doc 与 query 才在同一数值子空间；成批时长库向量与单条查询向量错位，代理指标 Recall@10 从 0.645 掉到 0.566（2026-11-15 实测）
+- 换模型要跑三件：`reembed.py` 重算向量 → 删 `cache/embed_*` → 重启 server（否则 server 仍用旧 encoder，查询向量落进旧空间）
+- 前端已从 server.py 的三引号串拆到 `static/`（index.html / app.css / app.js，2026-11-15）：门禁是 `node --check static/app.js`，旧的 `check_gallery_js.py`（eval 抽取）已删除；`/` 与 `/static/*` 一律 no-cache，改完刷新即生效，不必重启
+- 关停后手动拉起只走 `启动 zoteo-fig-db.bat` 或 `rm -f .manual_stop && $PY -u watchdog.py`；漏了 rm 时 watchdog 静默退出，用户侧表现是页面还开着但「检索出错，请查看控制台」（2026-11-15 实测，服务空窗数分钟，靠 `curl -w '%{http_code}'` 探到 000 才定位）
 - pythonw 副本必须放环境根目录（同级 python315.dll + Lib 相对定位）
 - Git Bash 里 PowerShell 的 `$_` 必须 `\$_` 转义；`/tmp` Windows python 不认
 - `edit` 工具 new/old_string 顺序要盯三遍（本会话多次翻车）；改共享 .ps1/.bat 注意编码
@@ -51,4 +68,6 @@ NO_BROWSER=1 $PY server.py                 # 画廊（默认 5173，0.0.0.0 局�
 夜跑状态看 `batch.log` 尾部 + `FINAL_DONE.json`（存在即完成）；隔离清单 `batch_state.json.quarantined`。完成后流程：重启 zoteo-fig-db 服务 → 抽样 read_image 目检 → 出中文总结报告。
 
 ## 访问拓扑（单人主机 + 多设备 API）
+长任务 API（进度条）：`POST /api/jobs/index`（202 + job_id；空库自动全量、否则最近 30 篇）· `GET /api/jobs/<id>` · `GET /api/jobs/latest`（刷新页面自动接上进度）；状态含 stage/done/total/current/mode，落 `cache/job_state.json`。
+
 图库仅在宿主机（恒定 overlay `100.64.0.10`，`GET /api/urls` 自答）。其他设备的 Agent 一律 HTTP：`/api/search`（top_k≤500）、`/image/<file>`、`/thumb/<file>`、`/api/stats`、`POST /api/update`；远程审图=下载 image 后本地 read_image。连不通先查 Windows 防火墙 TCP 5173 入站（专用配置文件）。

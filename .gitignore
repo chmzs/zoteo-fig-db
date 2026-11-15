@@ -14,6 +14,9 @@ FINAL_DONE.json
 # 个人评分（人工标注，机器相关，不入库；算法升级也绝不触碰）
 ratings.json
 ratings.json.tmp
+# 快捷预设（人工维护的检索入口，跨设备共享；改动由 /api/presets 落盘）
+presets.json
+presets.json.tmp
 
 *.sqlite-journal
 nul
