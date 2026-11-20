@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <mask id="lens-cutout-2">
+      <rect width="24" height="24" fill="#ffffff" />
+      <circle cx="16.5" cy="16.5" r="5.2" fill="#000000" />
+    </mask>
+  </defs>
+
+  <!-- Page outline + three offset panel blocks -->
+  <g mask="url(#lens-cutout-2)">
+    <path d="M5 2H12.5L17 6.5V19C17 19.55 16.55 20 16 20H5C4.45 20 4 19.55 4 19V3C4 2.45 4.45 2 5 2Z" stroke="#94a3b8" stroke-width="2" stroke-linejoin="round" />
+    <path d="M12 2V7H17" stroke="#94a3b8" stroke-width="2" stroke-linejoin="round" />
+    <!-- Three offset figure panels -->
+    <rect x="6.2" y="5.2" width="4.2" height="3.8" rx="0.8" fill="#38bdf8" />
+    <rect x="10.8" y="9.2" width="4.2" height="3.8" rx="0.8" fill="#38bdf8" />
+    <rect x="6.2" y="13.2" width="4.2" height="3.8" rx="0.8" fill="#38bdf8" />
+  </g>
+
+  <!-- Magnifier handle -->
+  <line x1="19.1" y1="19.1" x2="21.5" y2="21.5" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" />
+  <!-- Magnifier lens ring -->
+  <circle cx="16.5" cy="16.5" r="3.5" stroke="#e2e8f0" stroke-width="2" />
+</svg>
