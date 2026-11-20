@@ -56,6 +56,8 @@ function filterParams() {
     if (y2) p.push('year_max=' + y2);
     const st = byId('fStar').value;
     if (st) p.push('star_min=' + st);
+    const keys = byId('fItemKeys').value.trim();
+    if (keys) p.push('item_key=' + encodeURIComponent(keys));
     return p.length ? '&' + p.join('&') : '';
 }
 function clearFilters() {
@@ -64,6 +66,8 @@ function clearFilters() {
     byId('fYearMin').value = '';
     byId('fYearMax').value = '';
     byId('fStar').value = '';
+    byId('fItemKeys').value = '';
+    byId('countnote').textContent = '';
     doSearch();
 }
 async function setStar(idx, n, e) {
@@ -254,7 +258,11 @@ async function doSearch() {
 
     lastQuery = q;
     const gallery = byId('gallery');
-    gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 40px;">正在通过 e5 多语言语义检索...</div>';
+    const keysRaw = byId('fItemKeys').value.trim();
+    // 按 KEY 列图不是相似度排序，分数恒为 0：隐藏相关度徽标，避免误读
+    byId('gallery').classList.toggle('no-score', Boolean(keysRaw));
+    gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 40px;">'
+        + (keysRaw ? '正在按 Item Key 列出图表…' : '正在通过 granite 语义检索…') + '</div>';
 
     fetchTopK = 100;
     try {
@@ -267,6 +275,16 @@ async function doSearch() {
         const data = await res.json();
         currentResults = data;
         renderGallery(data);
+        if (keysRaw) {
+            const want = keysRaw.split(/[;,，；\s]+/).filter(Boolean)
+                .map((s) => s.replace(/^KEY-/i, '').toUpperCase());
+            const got = new Set(data.map((it) => (it.item_key || '').toUpperCase()));
+            const miss = want.filter((k) => !got.has(k));
+            byId('countnote').textContent = 'Item Key：' + got.size + ' 篇命中，共 ' + data.length + ' 张图'
+                + (miss.length ? '；未命中 ' + miss.join(', ') : '');
+        } else {
+            byId('countnote').textContent = '';
+        }
     } catch(e) {
         const detail = (e && e.message) ? e.message : String(e);
         console.error('search failed:', e);

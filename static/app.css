@@ -288,6 +288,9 @@ header {
     font-size: 10px;
     color: #64748b;
 }
+/* 按 Item Key 列图时相似度恒为 0，隐藏该徽标 */
+.no-score .sim-score { display: none; }
+
 .card-actions {
     margin-top: auto;
     padding-top: 10px;

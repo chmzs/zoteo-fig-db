@@ -187,6 +187,16 @@ CONTINUED_RE = re.compile(
     r"^(?:Fig(?:ure)?\.?)\s*\d+[a-z]?\s*[.:]?\s*\(?\s*continued\s*\)?\.?$", re.I)
 
 
+def parse_item_keys(raw):
+    """解析用户输入的 Zotero 条目 KEY 列表。
+
+    分隔符兼容分号/逗号/中文逗号/空白（习惯写法 ABCD1234;EFGH5678）；
+    去 KEY- 前缀、统一大写——消费端两种写法都要能命中。
+    """
+    tokens = re.split(r"[;,，；\s]+", (raw or "").strip())
+    return {re.sub(r"^KEY-", "", t, flags=re.IGNORECASE).upper() for t in tokens if t}
+
+
 def _iou(a, b):
     """两个矩形框的交并比。同页去重用：同图被 "Fig. 3" 与 "Figure 3" 两条题注各收一次时判定重复。"""
     inter = a & b
@@ -989,12 +999,13 @@ class FigureSearcher:
         ymax = _int_or_none(year_max) if year_max else None
         aq = (author or "").strip()  # 作者查询：归一化双向子串（中文↔拼音），见 author_norm
         # KEY- 前缀口径归一（消费端两种写法都要能命中，见 2026-10-18 工单§二.6）
-        ik = re.sub(r"^KEY-", "", (item_key or "").strip(), flags=re.IGNORECASE).upper() or None
+        # 多 KEY：分号/逗号/空白分隔（习惯写法 ABCD1234;EFGH5678），逐个去 KEY- 前缀
+        ik_set = parse_item_keys(item_key) or None
         fg = fig_no.strip().lower() if fig_no else None
         org = (origin or "").strip().lower() or None  # None=全部 / whole=仅整图 / panel=仅面板
 
         n = len(self._metas)
-        if ik:
+        if ik_set:
             # 单篇限定：候选=该篇全部行（几十行，全量扫 metas 零成本）。
             # 不再走 top-K 相似池：泛词查询(如 Holocene)的池/FTS 截断会把目标篇整篇挤出候选
             # → 曾致 item_key 过滤静默返空（工单§二.6 实测 bug）。
@@ -1003,7 +1014,7 @@ class FigureSearcher:
                 q_emb = self.encoder.encode_query(query)
                 sims = self._M @ q_emb
             cand_idx = [i for i, m in enumerate(self._metas)
-                        if (m["item_key"] or "").upper() == ik]
+                        if (m["item_key"] or "").upper() in ik_set]
         elif query:
             q_emb = self.encoder.encode_query(query)
             sims = self._M @ q_emb
@@ -1054,7 +1065,7 @@ class FigureSearcher:
                 continue
             if ymax is not None and (m["year"] or 9999) > ymax:
                 continue
-            if ik and (m["item_key"] or "").upper() != ik:
+            if ik_set and (m["item_key"] or "").upper() not in ik_set:
                 continue
             if fg and fg not in m["_fig_l"]:
                 continue

@@ -44,6 +44,10 @@
                 <option value="2">★≥2</option>
                 <option value="1">★≥1（只看已评分）</option>
             </select>
+            <input type="text" id="fItemKeys" placeholder="Item Key（多个用 ; 分隔）"
+                   title="按 Zotero 条目 KEY 精确列出该文全部图；多个 KEY 用分号分隔（如 ABCD1234;EFGH5678），回车即查"
+                   onkeydown="if (event.key === 'Enter') doSearch()"
+                   style="width:215px; padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#0f172a; color:#e2e8f0; font-size:13px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
             <button class="btn-search" style="padding:6px 14px; font-size:13px;" onclick="clearFilters()">清空过滤</button>
         </div>
         <div class="filter-row">

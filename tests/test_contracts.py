@@ -17,6 +17,8 @@ import numpy as np
 
 import ratings
 from adapters import get_adapter
+import engine
+from engine import parse_item_keys
 from family_rules import journal_family
 
 
@@ -231,6 +233,22 @@ class SearchSlicingContract(unittest.TestCase):
     def test_empty_query_without_filters_returns_nothing(self):
         # 防全库 dump：无词且无过滤 = 空操作
         self.assertEqual(self.searcher.search(""), [])
+
+
+class ItemKeyParsingTest(unittest.TestCase):
+    """按 Item Key 查图：入口解析必须容错（分号/逗号/空白、KEY- 前缀、大小写）。"""
+
+    def test_single_key(self):
+        self.assertEqual(parse_item_keys("8btqjnke"), {"8BTQJNKE"})
+
+    def test_multi_separators(self):
+        self.assertEqual(parse_item_keys("A1B2C3D4;E5F6G7H8,I9J0K1L2，M3N4O5P6 Q7R8S9T0"),
+                         {"A1B2C3D4", "E5F6G7H8", "I9J0K1L2", "M3N4O5P6", "Q7R8S9T0"})
+
+    def test_prefix_and_blank(self):
+        self.assertEqual(parse_item_keys(" KEY-abcd1234 ; "), {"ABCD1234"})
+        self.assertEqual(parse_item_keys(""), set())
+        self.assertEqual(parse_item_keys(None), set())
 
 
 if __name__ == "__main__":

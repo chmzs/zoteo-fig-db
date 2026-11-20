@@ -51,6 +51,7 @@ tail -20 cache/server.log                            # 排障入口：服务端 
 - 换模型要跑三件：`reembed.py` 重算向量 → 删 `cache/embed_*` → 重启 server（否则 server 仍用旧 encoder，查询向量落进旧空间）
 - 前端已从 server.py 的三引号串拆到 `static/`（index.html / app.css / app.js，2026-11-15）：门禁是 `node --check static/app.js`，旧的 `check_gallery_js.py`（eval 抽取）已删除；`/` 与 `/static/*` 一律 no-cache，改完刷新即生效，不必重启
 - 关停后手动拉起只走 `启动 zoteo-fig-db.bat` 或 `rm -f .manual_stop && $PY -u watchdog.py`；漏了 rm 时 watchdog 静默退出，用户侧表现是页面还开着但「检索出错，请查看控制台」（2026-11-15 实测，服务空窗数分钟，靠 `curl -w '%{http_code}'` 探到 000 才定位）
+- **重启必须确认旧进程真退**：`/api/shutdown` 后要 `sleep 4`，再用 `netstat -ano | grep -E ":5173|:23122" | grep LISTENING` 取 PID 逐个 `taskkill //F`；否则旧进程仍占 5173、watchdog 新进程绑不上，改动看似不生效（2026-11-20 多 KEY 检索"返 0"即此因，代码其实是对的）
 - pythonw 副本必须放环境根目录（同级 python315.dll + Lib 相对定位）
 - Git Bash 里 PowerShell 的 `$_` 必须 `\$_` 转义；`/tmp` Windows python 不认
 - `edit` 工具 new/old_string 顺序要盯三遍（本会话多次翻车）；改共享 .ps1/.bat 注意编码
