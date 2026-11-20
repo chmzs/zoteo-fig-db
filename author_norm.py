@@ -11,6 +11,7 @@
 
 import re
 import unicodedata
+from functools import lru_cache
 
 _HAS_PINYIN = True
 try:
@@ -139,9 +140,24 @@ def build_authors_norm(author_list):
     return " | ".join(parts)
 
 
+@lru_cache(maxsize=512)
 def query_forms(query):
     """查询词归一 → 形态集合（全名不降级为单姓）。"""
     return author_forms(query, is_query=True)
+
+
+def norm_forms_of(authors_norm):
+    """把 authors_norm 单列串拆成形态集合（' | ' 分作者，' / ' 分形态）。
+
+    用于建倒排索引：与 author_match 的边界判据同源，索引命中是真命中的超集。
+    """
+    forms = set()
+    for block in (authors_norm or "").split(" | "):
+        for form in block.split(" / "):
+            form = form.strip()
+            if form:
+                forms.add(form)
+    return forms
 
 
 def author_match(query, authors_norm):

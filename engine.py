@@ -18,6 +18,9 @@ import threading
 import time
 from collections import Counter
 
+from author_norm import norm_forms_of, query_forms
+from functools import lru_cache
+
 import fitz  # PyMuPDF
 import numpy as np
 import onnxruntime as ort
@@ -185,6 +188,14 @@ def resolve_abbr(journal, zot_abbr=""):
 # （2026-11-15 实测：764 行短题注里绝大多数属此类）
 CONTINUED_RE = re.compile(
     r"^(?:Fig(?:ure)?\.?)\s*\d+[a-z]?\s*[.:]?\s*\(?\s*continued\s*\)?\.?$", re.I)
+
+
+@lru_cache(maxsize=65536)
+def _cached_author_match(term, authors_norm):
+    """author_match 的记忆化包装：键是 (查询词, authors_norm 串)。"""
+    from author_norm import author_match
+
+    return author_match(term, authors_norm)
 
 
 def parse_author_terms(raw):
@@ -954,10 +965,31 @@ class FigureSearcher:
         self._sig = sig
         self._dump_cache()
 
+    def _ensure_author_index(self):
+        """作者形态倒排索引：form -> 行号集合，用于作者查询的候选预筛。
+
+        懒建，随缓存签名失效。作者匹配本身（author_match）仍是唯一判据，
+        索引只把候选从 16k 行收缩到命中作者的那几十行。
+        """
+        if getattr(self, "_author_index_sig", None) == self._sig and self._author_index is not None:
+            return self._author_index
+        index = {}
+        for i, meta in enumerate(self._metas or []):
+            for form in norm_forms_of(meta.get("authors_norm") or ""):
+                index.setdefault(form, set()).add(i)
+        self._author_index = index
+        self._author_index_sig = self._sig
+        return index
+
     _author_qcache = {}
 
     def _author_hit(self, aq, authors_norm):
-        """作者过滤：委托 author_norm.author_match，支持完全词条匹配与全名防降级。"""
+        """作者过滤：委托 author_norm.author_match，支持完全词条匹配与全名防降级。
+
+        同一篇的多行共享同一个 authors_norm 串，按串记忆化后比对次数从
+        「命中行数」降到「命中篇数」（Huang 这类大姓 3694 行 → ~400 篇）。
+        """
+        return _cached_author_match(aq, authors_norm)
         if not authors_norm:
             return False
         from author_norm import author_match
@@ -1049,7 +1081,18 @@ class FigureSearcher:
                 cand_idx.extend(self._id2idx[i] for i in fts_ids if i in self._id2idx)
         else:
             sims = None  # 纯过滤列表模式：按入库序输出,不算分
-            cand_idx = list(range(n))
+            if aq_terms:
+                # 倒排预筛：无关键词的作者查询原先扫全库 16k 行、每行做一次拼音归一（实测 7.6s）
+                index = self._ensure_author_index()
+                picked = set()
+                for term in aq_terms:
+                    hit = set()
+                    for form in query_forms(term):
+                        hit |= index.get(form, set())
+                    picked |= hit if hit else set(range(n))   # 索引无该形态 → 退回全扫
+                cand_idx = sorted(picked)
+            else:
+                cand_idx = list(range(n))
 
         def stars_of(meta):
             """查该图的个人评分；未评分返回 0。键必须与 ratings.py 的归一化一致。"""
@@ -1058,6 +1101,7 @@ class FigureSearcher:
             return rating_map.get(((meta["item_key"] or "").strip().upper(),
                                    re.sub(r"[\s.]", "", meta["_fig_l"])), 0)
 
+        note_uri_cache = {}   # 同篇多行共享一个 obsidian URI，避免逐行算路径
         q_lower = query.lower()
         scored = []
         seen_cand = set()
@@ -1114,7 +1158,10 @@ class FigureSearcher:
             seen.add(m["_dedup"])
             wikilink, link_kind = make_wikilink(m["item_key"], m["title"])
             wikilink = clean_wikilink_alias(wikilink, m.get("journal_abbr") or "")
-            note_uri = obsidian_uri(m["item_key"])
+            note_uri = note_uri_cache.get(m["item_key"])
+            if note_uri is None:
+                note_uri = obsidian_uri(m["item_key"])
+                note_uri_cache[m["item_key"]] = note_uri
             authors_str = m.get("authors", "") or _display_authors(m.get("author_first", ""), m.get("author_last", ""))
             results.append({
                 "id": m["id"],

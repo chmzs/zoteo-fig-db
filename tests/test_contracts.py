@@ -255,6 +255,16 @@ class ItemKeyParsingTest(unittest.TestCase):
         self.assertEqual(parse_item_keys(None), set())
 
 
+class ConfigCacheTest(unittest.TestCase):
+    """config.load() 必须缓存：每次重读 Zotero 的 prefs.js 会把检索路径拖死
+    （实测 100 条结果 = 400 次文件读、1.1 秒）。"""
+
+    def test_load_is_cached(self):
+        import config
+
+        self.assertIs(config.load(), config.load())
+
+
 class AuthorTermsTest(unittest.TestCase):
     """作者多值解析：只按分号/逗号切，作者名里的空格必须保留。"""
 
