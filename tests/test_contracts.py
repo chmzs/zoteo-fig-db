@@ -242,8 +242,12 @@ class ItemKeyParsingTest(unittest.TestCase):
         self.assertEqual(parse_item_keys("8btqjnke"), {"8BTQJNKE"})
 
     def test_multi_separators(self):
-        self.assertEqual(parse_item_keys("A1B2C3D4;E5F6G7H8,I9J0K1L2，M3N4O5P6 Q7R8S9T0"),
+        self.assertEqual(parse_item_keys("A1B2C3D4;E5F6G7H8,I9J0K1L2，M3N4O5P6；Q7R8S9T0"),
                          {"A1B2C3D4", "E5F6G7H8", "I9J0K1L2", "M3N4O5P6", "Q7R8S9T0"})
+
+    def test_space_is_not_separator(self):
+        # 与作者多值统一：空白不再是分隔符（多写一个空格会被当成非法 token，匹配不到任何条目）
+        self.assertEqual(parse_item_keys("A1B2C3D4 E5F6G7H8"), {"A1B2C3D4 E5F6G7H8"})
 
     def test_prefix_and_blank(self):
         self.assertEqual(parse_item_keys(" KEY-abcd1234 ; "), {"ABCD1234"})

@@ -204,11 +204,12 @@ def parse_author_terms(raw):
 def parse_item_keys(raw):
     """解析用户输入的 Zotero 条目 KEY 列表。
 
-    分隔符兼容分号/逗号/中文逗号/空白（习惯写法 ABCD1234;EFGH5678）；
+    分隔符只有分号/逗号（与作者多值统一，2026-11-20 按用户要求去掉空白分隔）；
     去 KEY- 前缀、统一大写——消费端两种写法都要能命中。
     """
-    tokens = re.split(r"[;,，；\s]+", (raw or "").strip())
-    return {re.sub(r"^KEY-", "", t, flags=re.IGNORECASE).upper() for t in tokens if t}
+    tokens = re.split(r"[;,，；]+", (raw or "").strip())
+    # 不按空白切分，但要 strip 掉 token 两端的空白（" ABCD1234 " 合法）
+    return {re.sub(r"^KEY-", "", t.strip(), flags=re.IGNORECASE).upper() for t in tokens if t.strip()}
 
 
 def _iou(a, b):
