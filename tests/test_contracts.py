@@ -18,7 +18,7 @@ import numpy as np
 import ratings
 from adapters import get_adapter
 import engine
-from engine import parse_item_keys
+from engine import parse_author_terms, parse_item_keys
 from family_rules import journal_family
 
 
@@ -249,6 +249,21 @@ class ItemKeyParsingTest(unittest.TestCase):
         self.assertEqual(parse_item_keys(" KEY-abcd1234 ; "), {"ABCD1234"})
         self.assertEqual(parse_item_keys(""), set())
         self.assertEqual(parse_item_keys(None), set())
+
+
+class AuthorTermsTest(unittest.TestCase):
+    """作者多值解析：只按分号/逗号切，作者名里的空格必须保留。"""
+
+    def test_single(self):
+        self.assertEqual(parse_author_terms("唐丽雅"), ["唐丽雅"])
+
+    def test_multi_and_space_preserved(self):
+        self.assertEqual(parse_author_terms("唐丽雅;Zhang San，Huang"), ["唐丽雅", "zhang san", "huang"])
+
+    def test_dedupe_and_blank(self):
+        self.assertEqual(parse_author_terms("Tang;tang;; "), ["tang"])
+        self.assertEqual(parse_author_terms(""), [])
+        self.assertEqual(parse_author_terms(None), [])
 
 
 if __name__ == "__main__":

@@ -187,6 +187,20 @@ CONTINUED_RE = re.compile(
     r"^(?:Fig(?:ure)?\.?)\s*\d+[a-z]?\s*[.:]?\s*\(?\s*continued\s*\)?\.?$", re.I)
 
 
+def parse_author_terms(raw):
+    """解析作者多值输入：只要分号/逗号分隔（作者名本身含空格，不能按空白切）。
+
+    返回小写去重词表；匹配走 _author_hit 的归一化子串比对，故大小写无关。
+    上限 20 个，防误粘长列表把每行都跑一遍子串比对。
+    """
+    terms = []
+    for token in re.split(r"[;，、,]+", raw or ""):
+        term = token.strip()
+        if term and term.lower() not in terms:
+            terms.append(term.lower())
+    return terms[:20]
+
+
 def parse_item_keys(raw):
     """解析用户输入的 Zotero 条目 KEY 列表。
 
@@ -997,7 +1011,8 @@ class FigureSearcher:
 
         ymin = _int_or_none(year_min) if year_min else None
         ymax = _int_or_none(year_max) if year_max else None
-        aq = (author or "").strip()  # 作者查询：归一化双向子串（中文↔拼音），见 author_norm
+        # 作者查询：多值 OR（分号分隔），单值行为不变；归一化双向子串（中文↔拼音）见 author_norm
+        aq_terms = parse_author_terms(author)
         # KEY- 前缀口径归一（消费端两种写法都要能命中，见 2026-10-18 工单§二.6）
         # 多 KEY：分号/逗号/空白分隔（习惯写法 ABCD1234;EFGH5678），逐个去 KEY- 前缀
         ik_set = parse_item_keys(item_key) or None
@@ -1059,7 +1074,8 @@ class FigureSearcher:
                         continue
                 elif jf not in mj:
                     continue
-            if aq and not self._author_hit(aq, m.get("authors_norm") or ""):
+            if aq_terms and not any(self._author_hit(term, m.get("authors_norm") or "")
+                                    for term in aq_terms):
                 continue
             if ymin is not None and (m["year"] or 0) < ymin:
                 continue
