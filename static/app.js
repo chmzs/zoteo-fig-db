@@ -264,7 +264,9 @@ async function doSearch() {
     gallery.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #64748b; padding: 40px;">'
         + (keysRaw ? '正在按 Item Key 列出图表…' : '正在通过 granite 语义检索…') + '</div>';
 
-    fetchTopK = 100;
+    const DISPLAY_LIMIT = 100;
+    // 多取 1 条当哨兵：存在第 101 条即说明结果被截断（比"已显示 100"精确，也不靠猜）
+    fetchTopK = DISPLAY_LIMIT + 1;
     try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&top_k=${fetchTopK}${fp}`);
         if (!res.ok) {
@@ -273,17 +275,24 @@ async function doSearch() {
             throw new Error('HTTP ' + res.status + ' ' + body.slice(0, 400));
         }
         const data = await res.json();
-        currentResults = data;
-        renderGallery(data);
+        const truncated = data.length > DISPLAY_LIMIT;
+        const rows = truncated ? data.slice(0, DISPLAY_LIMIT) : data;
+        currentResults = rows;
+        renderGallery(rows);
         if (keysRaw) {
-            const want = keysRaw.split(/[;,，；\s]+/).filter(Boolean)
+            const want = keysRaw.split(/[;,，；]+/).filter(Boolean)
                 .map((s) => s.replace(/^KEY-/i, '').toUpperCase());
             const got = new Set(data.map((it) => (it.item_key || '').toUpperCase()));
             const miss = want.filter((k) => !got.has(k));
-            byId('countnote').textContent = 'Item Key：' + got.size + ' 篇命中，共 ' + data.length + ' 张图'
-                + (miss.length ? '；未命中 ' + miss.join(', ') : '');
+            byId('countnote').textContent = 'Item Key：' + got.size + ' 篇命中，共 ' + rows.length + ' 张图'
+                + (miss.length ? '；未命中 ' + miss.join(', ') : '')
+                + (truncated ? '；超过 ' + DISPLAY_LIMIT + ' 张已截断' : '');
         } else {
-            byId('countnote').textContent = '';
+            const papers = new Set(rows.map((it) => it.item_key)).size;
+            byId('countnote').textContent = truncated
+                ? '命中超过 ' + DISPLAY_LIMIT + ' 张图，已显示前 ' + DISPLAY_LIMIT
+                    + '（' + papers + ' 篇）；加条件缩小范围可看全'
+                : '共 ' + rows.length + ' 张图 / ' + papers + ' 篇';
         }
     } catch(e) {
         const detail = (e && e.message) ? e.message : String(e);
